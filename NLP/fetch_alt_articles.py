@@ -1,18 +1,20 @@
+import json
 import logging
 import os
-from datetime import datetime
 import sys
+from datetime import datetime
 
 import pandas as pd
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-#insert project root into your path (1)
-proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..")) 
-if proj_root not in sys.path: 
+# insert project root into your path (1)
+proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if proj_root not in sys.path:
     sys.path.insert(0, proj_root)
 
 from src.common.articles_gateway import ArticlesGateway
+
 gateway = ArticlesGateway()
 
 
@@ -168,7 +170,6 @@ class ArticleScraper:
             print(f" {n} - {title}")
         return duplicates
 
-
     def scrape_yahoo(self):
         """
         Scrape latest news items for `symbol` from Yahoo Finance.
@@ -288,16 +289,80 @@ class ArticleScraper:
                 "site": url,
             }
 
+    def trump_tracker(self):
+        """Scrape Truth Social posts and keep only non-empty text posts."""
+        from apify_client import ApifyClient
+
+        # Initialize the ApifyClient with your API token
+        client = ApifyClient(os.getenv("APIFY_KEY"))
+
+        # Prepare the Actor input
+        run_input = {
+            "username": "realDonaldTrump",
+            "maxPosts": 20,
+            "useLastPostId": False,
+            "onlyReplies": False,
+            "onlyMedia": False,
+            "cleanContent": True,
+            "startFromId": None,
+            "singlePostId": None,
+        }
+        posts = []
+        # Run the Actor and wait for it to finish
+        run = client.actor("sTDLfdZAmte0aYlxg").call(run_input=run_input)
+
+        # Fetch Actor results from the run's dataset (if there are any)
+        if run and "defaultDatasetId" in run:
+            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+                if isinstance(item, dict):
+                    content = str(item.get("content") or "").strip()
+                    if content:
+                        posts.append(
+                            {
+                                "publishedDate": item.get("created_at"),
+                                "title": "Truth Social Post",
+                                "content": content,
+                                "site": item.get("url"),
+                            }
+                        )
+                elif isinstance(item, list):
+                    for sub_item in item:
+                        if isinstance(sub_item, dict):
+                            content = str(sub_item.get("content") or "").strip()
+                            if content:
+                                posts.append(
+                                    {
+                                        "publishedDate": sub_item.get("created_at"),
+                                        "title": "Truth Social Post",
+                                        "content": content,
+                                        "site": sub_item.get("url"),
+                                    }
+                                )
+            return posts
+
+        logging.warning("No dataset found in the run result")
+        return []
+
 
 def main():
+    tracker_scraper = ArticleScraper("TRUMP")
+    ttracker = tracker_scraper.trump_tracker()
+    print("Getting trump tracker data...")
+    print(f"Fetched {len(ttracker)} posts from Trump Tracker.")
+    ttracker_df = pd.DataFrame(ttracker)
+    ttracker_csv_path = f"{PATH}/trump_tracker.csv"
+    ttracker_df.to_csv(ttracker_csv_path, index=False, date_format="%Y-%m-%d %H:%M:%S")
+    print(f"Saved Trump Tracker CSV to: {ttracker_csv_path}")
+    if ttracker_df.empty:
+        print("No posts returned.")
+    print("--------------------\n")
+
     for symbol in ["AAPL", "MSFT", "GOOGL"]:
         scraper = ArticleScraper(symbol)
-        logging.info(f"Fetching articles for {symbol}...")
+        logging.info(f"\nFetching articles for {symbol}...")
         yahoo = scraper.scrape_yahoo()
         finviz = scraper.scrape_finviz()
         alpha = scraper.scrape_alpha()
-        print("--------------------\n")
-        print(f"Fetching articles for {symbol}.")
 
         # Convert to DataFrame for further analysis if needed
         yahoo_news_df = pd.DataFrame(yahoo)
