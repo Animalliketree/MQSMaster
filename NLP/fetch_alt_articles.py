@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import sys
@@ -23,6 +22,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
 PATH = os.path.dirname(__file__) + "/articles"
+TRUTH_SOCIAL_ACTOR_ID = "sTDLfdZAmte0aYlxg"
 
 
 class ArticleScraper:
@@ -293,8 +293,14 @@ class ArticleScraper:
         """Scrape Truth Social posts and keep only non-empty text posts."""
         from apify_client import ApifyClient
 
+        api_key = os.getenv("APIFY_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Missing APIFY_KEY environment variable. Set APIFY_KEY in your environment or .env file before running trump_tracker()."
+            )
+
         # Initialize the ApifyClient with your API token
-        client = ApifyClient(os.getenv("APIFY_KEY"))
+        client = ApifyClient(api_key)
 
         # Prepare the Actor input
         run_input = {
@@ -307,37 +313,41 @@ class ArticleScraper:
             "startFromId": None,
             "singlePostId": None,
         }
+
+        def extract_post_from_dict(post_dict):
+            if not isinstance(post_dict, dict):
+                return None
+
+            content = str(post_dict.get("content") or "").strip()
+            if not content:
+                return None
+
+            return {
+                "publishedDate": post_dict.get("created_at"),
+                "title": "Truth Social Post",
+                "content": content,
+                "site": post_dict.get("url"),
+            }
+
         posts = []
         # Run the Actor and wait for it to finish
-        run = client.actor("sTDLfdZAmte0aYlxg").call(run_input=run_input)
-
+        try:
+            run = client.actor(TRUTH_SOCIAL_ACTOR_ID).call(run_input=run_input)
+        except Exception as e:
+            logging.error(f"Failed to run Apify actor: {e}")
+            return []
         # Fetch Actor results from the run's dataset (if there are any)
         if run and "defaultDatasetId" in run:
             for item in client.dataset(run["defaultDatasetId"]).iterate_items():
                 if isinstance(item, dict):
-                    content = str(item.get("content") or "").strip()
-                    if content:
-                        posts.append(
-                            {
-                                "publishedDate": item.get("created_at"),
-                                "title": "Truth Social Post",
-                                "content": content,
-                                "site": item.get("url"),
-                            }
-                        )
+                    extracted_post = extract_post_from_dict(item)
+                    if extracted_post:
+                        posts.append(extracted_post)
                 elif isinstance(item, list):
                     for sub_item in item:
-                        if isinstance(sub_item, dict):
-                            content = str(sub_item.get("content") or "").strip()
-                            if content:
-                                posts.append(
-                                    {
-                                        "publishedDate": sub_item.get("created_at"),
-                                        "title": "Truth Social Post",
-                                        "content": content,
-                                        "site": sub_item.get("url"),
-                                    }
-                                )
+                        extracted_post = extract_post_from_dict(sub_item)
+                        if extracted_post:
+                            posts.append(extracted_post)
             return posts
 
         logging.warning("No dataset found in the run result")
@@ -346,15 +356,21 @@ class ArticleScraper:
 
 def main():
     tracker_scraper = ArticleScraper("TRUMP")
-    ttracker = tracker_scraper.trump_tracker()
     print("Getting trump tracker data...")
+    ttracker = tracker_scraper.trump_tracker()
     print(f"Fetched {len(ttracker)} posts from Trump Tracker.")
     ttracker_df = pd.DataFrame(ttracker)
     ttracker_csv_path = f"{PATH}/trump_tracker.csv"
-    ttracker_df.to_csv(ttracker_csv_path, index=False, date_format="%Y-%m-%d %H:%M:%S")
-    print(f"Saved Trump Tracker CSV to: {ttracker_csv_path}")
     if ttracker_df.empty:
         print("No posts returned.")
+    else:
+        ttracker_df["publishedDate"] = pd.to_datetime(
+            ttracker_df["publishedDate"], errors="coerce", utc=True
+        ).dt.tz_convert(None)
+        ttracker_df.to_csv(
+            ttracker_csv_path, index=False, date_format="%Y-%m-%d %H:%M:%S"
+        )
+        print(f"Saved Trump Tracker CSV to: {ttracker_csv_path}")
     print("--------------------\n")
 
     for symbol in ["AAPL", "MSFT", "GOOGL"]:
