@@ -357,7 +357,14 @@ class ArticleScraper:
 def main():
     tracker_scraper = ArticleScraper("TRUMP")
     print("Getting trump tracker data...")
-    ttracker = tracker_scraper.trump_tracker()
+    try:
+        ttracker = tracker_scraper.trump_tracker()
+    except RuntimeError as e:
+        logging.warning(f"Skipping Trump Tracker scrape: {e}")
+        ttracker = []
+    except Exception as e:
+        logging.exception(f"Unexpected error while scraping Trump Tracker: {e}")
+        ttracker = []
     print(f"Fetched {len(ttracker)} posts from Trump Tracker.")
     ttracker_df = pd.DataFrame(ttracker)
     ttracker_csv_path = f"{PATH}/trump_tracker.csv"
