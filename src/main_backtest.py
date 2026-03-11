@@ -28,7 +28,7 @@ def main(
     start_date="2025-01-01",
     end_date="2025-01-31",
     initial_capital=1000000.0,
-    slippage=0,
+    slippage=1,
 ):
     """
     Main entry point for the MQS Trading System backtests.

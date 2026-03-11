@@ -58,6 +58,9 @@ This project uses a pyproject.toml file for setup. The following commands will i
 
 Install the project in "editable" mode
 
+
+
+`python3 -m pip install --upgrade pip`
 `pip install -e .`
 
 `pip install --no-cache-dir --only-binary :all: -r requirements.txt`

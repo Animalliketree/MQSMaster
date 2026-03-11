@@ -62,6 +62,7 @@ class AssetData:
         self.Low = _to_float(self.latest_row.get('low_price'))
         self.Close = _to_float(self.latest_row.get('close_price'))
         self.Volume = _to_float(self.latest_row.get('volume'))
+        
         if self.Close is None:
             self.Exists = False
             self._set_defaults()
