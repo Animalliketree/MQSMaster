@@ -74,6 +74,10 @@ class RegimeAdaptiveStrategy(BasePortfolio):
         # --- Trade History (used for history-based confidence scaling) ---
         # entry_price: most recent buy price per ticker, used for stop-loss and PnL tracking.
         self.entry_price = {}
+
+        # Track entry regime (high vs low) alongside entry_price, prevents MR exits while in momentum regime.
+        self.entry_regime = {}
+
         # trade_results: rolling list of (exit_price - entry_price) per ticker, capped at 5.
         # Positive = win, negative = loss. Drives history_factor in confidence formula.
         self.trade_results = {}
@@ -84,18 +88,17 @@ class RegimeAdaptiveStrategy(BasePortfolio):
         # --- Signal Parameters (tune these between runs) ---
         # ATR multiplier for VWAP fade bands. Higher = fewer but higher-conviction signals.
         # 1.0 triggers on routine intraday moves; 2.0 requires a meaningful dislocation.
-        self.ATR_BAND_MULT = 2.0
+        self.ATR_BAND_MULT = 1.5
 
-        # Minimum 5-day ROC (%) to trigger a momentum regime signal.
-        # 0.2 was too noisy; 1.0 filters out most mean-noise moves.
-        self.MOMENTUM_THRESHOLD = 1.0
+        # 10-day ROC, threshold increased to 1.5, filter out noise.
+        self.MOMENTUM_THRESHOLD = 1.5
 
-        # Base trade confidence. Scales position size: 0.4 -> ~40% of one bar's allocation.
-        self.BASE_CONF = 0.4
+        # Base trade confidence. Scales position size: 0.6 -> ~60% of one bar's allocation. 
+        self.BASE_CONF = 0.6
 
         # Stop-loss multiplier: exit if price drops this many ATRs below the recorded entry.
         # 1.5 gives a buffer of roughly 1.5x the recent daily range before cutting the loss.
-        self.STOP_LOSS_ATR_MULT = 1.5
+        self.STOP_LOSS_ATR_MULT = 3
 
         # *---------------------------------------------------
         # * 1. DEFINE YOUR INDICATORS HERE
@@ -116,7 +119,11 @@ class RegimeAdaptiveStrategy(BasePortfolio):
             ),
             "momentum_pct": (
                 "RateOfChange",
-                {"period": 5, "price_col": "close_price", "mode": "percentage"},
+                {"period": 10, "price_col": "close_price", "mode": "percentage"},
+            ),
+            "sma50": (
+                "SimpleMovingAverage",
+                {"period": 50, "price_col": "close_price"},
             ),
         }
 
@@ -131,11 +138,11 @@ class RegimeAdaptiveStrategy(BasePortfolio):
         self.vix_ema = self.AddIndicator(
             "ExponentialMovingAverage",
             "^VIX",
-            period=20
+            period=10
         )
 
         self.logger.info("RegimeAdaptiveStrategy initialized for OnData framework.")
-        self.logger.info(f"Registered indicators: {list(indicator_definitions.keys())} + VIX EMA(20)")
+        self.logger.info(f"Registered indicators: {list(indicator_definitions.keys())} + VIX EMA(10)"  )
 
     
     def generate_signals_and_trade(
@@ -309,11 +316,12 @@ class RegimeAdaptiveStrategy(BasePortfolio):
                 vwap_ind = self.vwap[ticker]
                 atr_ind = self.atr[ticker]
                 momentum_ind = self.momentum_pct[ticker]
+                sma50_ind = self.sma50[ticker]
 
                 asset_data = context.Market[ticker]
 
                 # Check if indicator data is ready
-                indicators_to_check = [vwap_ind, atr_ind, momentum_ind]
+                indicators_to_check = [vwap_ind, atr_ind, momentum_ind, sma50_ind]
                 if not all(ind.IsReady for ind in indicators_to_check):
                     continue
                 if not asset_data.Exists:
@@ -325,21 +333,24 @@ class RegimeAdaptiveStrategy(BasePortfolio):
                 vwap_v = vwap_ind.Current
                 atr_v = atr_ind.Current
                 momentum_v = momentum_ind.Current
+                sma50_v = sma50_ind.Current
                 latest_price = asset_data.Close
                 quantity = positions_dict.get(ticker, 0.0)
 
-                all_values = [vwap_v, atr_v, momentum_v, latest_price, quantity]
+                all_values = [vwap_v, atr_v, momentum_v, sma50_v, latest_price, quantity]
 
                 # Skip iteration if missing ticker value(s)
                 if any(v is None for v in all_values):
                     self.logger.debug(f"Skipping {ticker} due to None values.")
                     continue
 
-                # Determine volatility regime using vix, removed is_market_open check
+                # Determine volatility regime using vix, removed is_market_open check.
+                # Vix must be >5% above its EMA before switching to high_vol. Increase
+                # value for more stability since vix ema reduced to 10-day.
                 if self.vix_ema.IsReady:
-                    is_high_vol = vix_value > self.vix_ema.Current
+                    is_high_vol = vix_value > self.vix_ema.Current * 1.05
                 else:
-                    is_high_vol = vix_value > 18
+                    is_high_vol = vix_value > 20
 
                 # Upper and lower bands WITH multiplier param
                 upper_band = vwap_v + atr_v * self.ATR_BAND_MULT
@@ -350,29 +361,9 @@ class RegimeAdaptiveStrategy(BasePortfolio):
                 is_mean_reversion_exit = False
                 is_stop_loss_exit = False
 
-                if is_high_vol:
-                    # Regime: High Volatility -> Fade (Mean Reversion)
-                    if latest_price > upper_band:
-                        # Price significantly above VWAP -> sell
-                        signal = "SELL"
-                    elif latest_price < lower_band:
-                        # Price significantly below VWAP -> buy
-                        signal = "BUY"
-                    elif quantity > 0 and latest_price >= vwap_v:
-                        # Price has reverted to the mean, sell and flag mean reversion exit (pull out)
-                        signal = "SELL"
-                        is_mean_reversion_exit = True
-                
-                else:
-                    # Regime: Low Volatility -> Momentum
-                    if momentum_v > self.MOMENTUM_THRESHOLD:
-                        signal = "BUY"
-                    elif momentum_v < -self.MOMENTUM_THRESHOLD:
-                        signal = "SELL"
-
-                # Stop loss -> if holding pos and price drops below STOP_LOSS_ATR_MULT (set in __init__),
-                # force sell regardless of regime.
-                if signal == "HOLD" and quantity > 0 and ticker in self.entry_price:
+                # Stop loss -> force sell regardless of regime signal.
+                # Checked first so it overrides any BUY signal that would average into a loss.
+                if quantity > 0 and ticker in self.entry_price:
                     entry = self.entry_price[ticker]
                     if latest_price <= entry - self.STOP_LOSS_ATR_MULT * atr_v:
                         signal = "SELL"
@@ -381,6 +372,33 @@ class RegimeAdaptiveStrategy(BasePortfolio):
                             f"[{ticker}] Stop-loss triggered: price {latest_price:.2f} "
                             f"<= entry {entry:.2f} - {self.STOP_LOSS_ATR_MULT}*ATR({atr_v:.2f})"
                         )
+
+                if not is_stop_loss_exit:
+                    if is_high_vol:
+                        # Regime: High Volatility -> Fade (Mean Reversion)
+                        if latest_price > upper_band:
+                            # Price significantly above VWAP -> sell
+                            signal = "SELL"
+                        elif latest_price < lower_band:
+                            # Price significantly below VWAP -> buy
+                            signal = "BUY"
+                        elif (
+                            quantity > 0
+                            and latest_price >= vwap_v
+                            and self.entry_regime.get(ticker) == "high_vol"
+                        ):
+                            # Price has reverted to VWAP; only exit if the position was during current
+                            # high vol regime to avoid prematurely closing momentum trades.
+                            signal = "SELL"
+                            is_mean_reversion_exit = True
+
+                    else:
+                        # Regime: Low Volatility -> Momentum
+                        # Require price above SMA(50) to confirm the trend before buying.
+                        if momentum_v > self.MOMENTUM_THRESHOLD and latest_price > sma50_v:
+                            signal = "BUY"
+                        elif momentum_v < -self.MOMENTUM_THRESHOLD:
+                            signal = "SELL"
 
                 # Fix issue of sell creating shorts -> sell signals only
                 # close existing longs.
@@ -504,8 +522,9 @@ class RegimeAdaptiveStrategy(BasePortfolio):
                         self._execute_order(
                             context, ticker, "BUY", confidence, latest_price, trade_ts, n_stocks
                         )
-                        # Record entry price for stop-loss and win/loss tracking.
+                        # # Record entry price and entry regime for stop-loss and win/loss tracking.
                         self.entry_price[ticker] = latest_price
+                        self.entry_regime[ticker] = "high_vol" if is_high_vol else "low_vol"
 
                     elif signal == "SELL":
                         self._execute_order(
@@ -520,6 +539,8 @@ class RegimeAdaptiveStrategy(BasePortfolio):
                             if len(self.trade_results[ticker]) > 5:
                                 self.trade_results[ticker] = self.trade_results[ticker][-5:]
                             del self.entry_price[ticker]
+                        # remove stored entry regime when sold
+                        self.entry_regime.pop(ticker, None)
 
                     self.last_decision_time[ticker] = trade_ts
                     self.last_signal[ticker] = signal
