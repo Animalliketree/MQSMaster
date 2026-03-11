@@ -15,6 +15,10 @@ import pandas as pd
 from src.common.database.MQSDBConnector import MQSDBConnector
 from src.portfolios.portfolio_BASE.strategy import BasePortfolio
 
+from .reporting import (
+    _calculate_portfolio_risk_components,
+    _calculate_rolling_portfolio_risk,
+)
 from .runner import BacktestRunner
 from .vector_strategy_adapters import get_vector_adapter_for_portfolio
 from .vectorized_backtest import VectorBacktester
@@ -476,6 +480,88 @@ class BacktestEngine:
                 out_dir,
                 fast_cfg["mc_n_sims"],
                 fast_cfg["mc_method"],
+            )
+
+        # --- Section: Risk Analytics (parity with event-mode reporting) ---
+        try:
+            # Derive portfolio weights from the last row of the signal weights matrix.
+            last_weights = weights.iloc[-1]
+            portfolio_weights = last_weights[last_weights != 0].to_dict()
+
+            if portfolio_weights:
+                # Reshape historical_daily to the format expected by reporting helpers:
+                # DataFrame with columns: timestamp, ticker, close_price
+                risk_data = historical_daily[["timestamp", "ticker", "close_price"]].copy()
+
+                corr_matrix, indiv_vols, weights_df = _calculate_portfolio_risk_components(
+                    risk_data, portfolio_weights
+                )
+                if not corr_matrix.empty:
+                    aligned_weights_df = weights_df[
+                        weights_df["ticker"].isin(corr_matrix.columns)
+                    ]
+                    risk_components_summary = pd.concat(
+                        [
+                            aligned_weights_df.set_index("ticker"),
+                            indiv_vols.rename("annualized_volatility"),
+                        ],
+                        axis=1,
+                    )
+                    risk_components_summary.to_csv(
+                        os.path.join(out_dir, "portfolio_risk_components.csv")
+                    )
+                    corr_matrix.to_csv(
+                        os.path.join(out_dir, "annualized_correlation_matrix.csv")
+                    )
+                    self.logger.info(
+                        "Saved portfolio_risk_components.csv and annualized_correlation_matrix.csv"
+                    )
+
+                rolling_risk_df = _calculate_rolling_portfolio_risk(
+                    risk_data, portfolio_weights
+                )
+                if not rolling_risk_df.empty:
+                    rolling_risk_df.to_csv(
+                        os.path.join(out_dir, "rolling_portfolio_risk.csv"), index=False
+                    )
+                    self.logger.info("Saved rolling_portfolio_risk.csv")
+            else:
+                self.logger.warning(
+                    "Fast mode risk analytics skipped: all portfolio weights are zero."
+                )
+        except Exception as e:
+            self.logger.error("Error in fast mode risk analytics: %s", e, exc_info=True)
+
+        # --- Section: Portfolio Composition Timeseries (daily approximation) ---
+        # Fast mode has no trade log, so we approximate the composition from the
+        # daily weight allocations and cumulative portfolio value.
+        try:
+            portfolio_value_series = (
+                quick_results["cum_strategy"] * self.initial_capital
+            )
+            composition_df = pd.DataFrame({"timestamp": weights.index})
+            for ticker in selected_tickers:
+                ticker_weight = lagged_weights[ticker].reindex(weights.index).fillna(0.0)
+                composition_df[f"{ticker}_value"] = (
+                    ticker_weight.values * portfolio_value_series.reindex(weights.index).values
+                )
+            total_allocated = composition_df[
+                [c for c in composition_df.columns if c.endswith("_value")]
+            ].sum(axis=1)
+            composition_df["cash_value"] = (
+                portfolio_value_series.reindex(weights.index).values - total_allocated.values
+            )
+            composition_df["portfolio_value"] = portfolio_value_series.reindex(
+                weights.index
+            ).values
+            composition_df.to_csv(
+                os.path.join(out_dir, "performance_timeseries_minute_by_minute.csv"),
+                index=False,
+            )
+            self.logger.info("Saved performance_timeseries_minute_by_minute.csv (daily approximation)")
+        except Exception as e:
+            self.logger.error(
+                "Error generating composition timeseries: %s", e, exc_info=True
             )
 
         self.logger.info("Fast vectorized artifacts saved to %s", out_dir)
