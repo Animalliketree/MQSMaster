@@ -28,7 +28,7 @@ logging.basicConfig(
 
 
 DEFAULT_PORTFOLIO_CLASSES = [
-    # VolMomentum,
+    #  VolMomentum,
     # MomentumStrategy,
     # RegimeAdaptiveStrategy,
     TrendRotateStrategy,

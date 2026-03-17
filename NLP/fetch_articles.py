@@ -14,6 +14,7 @@ if proj_root not in sys.path:
     sys.path.insert(0, proj_root)
 
 from src.common.articles_gateway import ArticlesGateway
+
 gateway = ArticlesGateway()
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
@@ -25,6 +26,17 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "articles")
 STATE_DIR = os.path.join(BASE_DIR, "fetch_state")
 
 
+def normalize_published_date(df):
+    """Coerce publishedDate to pandas datetime and drop invalid rows."""
+    if df is None or df.empty or "publishedDate" not in df.columns:
+        return df
+
+    out = df.copy()
+    out["publishedDate"] = pd.to_datetime(out["publishedDate"], errors="coerce")
+    out = out.dropna(subset=["publishedDate"])
+    return out
+
+
 # ─── ARGPARSE TO PICK UP COMMAND‐LINE ARGUMENTS ───────────────────────────────
 def parse_args():
     """Parse command-line arguments for ticker and date range."""
@@ -33,11 +45,17 @@ def parse_args():
     )
     p.add_argument("ticker", help="The ticker symbol to fetch (e.g., AAPL).")
     p.add_argument(
-        "start_date", help="Start date for fetching articles, in YYYY-MM-DD format."
-    )
+        "start_date",
+        help="Start date for fetching articles, in YYYY-MM-DD format.")
     p.add_argument(
-        "end_date", help="End date for fetching articles, in YYYY-MM-DD format."
-    )
+        "end_date",
+        help="End date for fetching articles, in YYYY-MM-DD format.")
+    p.add_argument("--trump_tracker",
+                   help="Include Trump truth social post?(True/False)",
+                   type=bool,
+                   default=False,
+                   required=False
+                )
     return p.parse_args()
 
 
@@ -182,16 +200,19 @@ def update_ticker_csv(symbol, start_date_str, end_date_str):
 
         # Update CSV if we found articles
         if articles:
-            new_df = pd.DataFrame(articles)
+            new_df = normalize_published_date(pd.DataFrame(articles))
 
             if os.path.exists(csv_path):
                 try:
                     old_df = pd.read_csv(csv_path, parse_dates=["publishedDate"])
+                    old_df = normalize_published_date(old_df)
                     combined = pd.concat([old_df, new_df], ignore_index=True)
                 except pd.errors.EmptyDataError:
                     combined = new_df
             else:
                 combined = new_df
+
+            combined = normalize_published_date(combined)
 
             # Remove duplicates and sort
             initial_count = len(combined)
@@ -221,7 +242,9 @@ def update_ticker_csv(symbol, start_date_str, end_date_str):
 
 def remove_duplicates(*kwargs):
     """Remove duplicates based on title and publishedDate."""
-    combined = pd.concat([*kwargs], ignore_index=True)
+    normalized = [normalize_published_date(df) for df in kwargs if df is not None]
+    combined = pd.concat(normalized, ignore_index=True)
+    combined = normalize_published_date(combined)
     before_dedup = len(combined)
     combined.drop_duplicates(
         subset=["publishedDate", "title"], keep="first", inplace=True
@@ -232,7 +255,7 @@ def remove_duplicates(*kwargs):
     )
     return combined
 
-def merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df):
+def merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df, tmnt_news_df):
     """Merge all article sources into a single CSV file per ticker."""
     path = os.path.dirname(__file__) + "/articles"
     fmp_path = f"{path}/{args.ticker.upper()}.csv"
@@ -240,6 +263,7 @@ def merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df):
     # Load existing FMP data if it exists
     try:
         fmp_df = pd.read_csv(fmp_path, parse_dates=["publishedDate"])
+        fmp_df = normalize_published_date(fmp_df)
         print(f"Loaded existing FMP data: {len(fmp_df)} articles")
     except FileNotFoundError:
         print(f"No existing FMP data found for {args.ticker.upper()}")
@@ -263,7 +287,9 @@ def merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df):
     if not alpha_news_df.empty:
         all_dataframes.append(alpha_news_df)
         print(f"Alpha Vantage articles: {len(alpha_news_df)}")
-    
+    if not tmnt_news_df.empty and args.trump_tracker:
+        all_dataframes.append(tmnt_news_df)
+        print(f"Trump Tracker articles: {len(tmnt_news_df)}")
     if not all_dataframes:
         print(f"No articles found for {args.ticker.upper()}")
         return fmp_path
@@ -297,17 +323,18 @@ def main():
     alpha = scraper.scrape_alpha(
         ticker=[args.ticker.upper()], time_from=start, time_to=end
     )
+    tmnt = scraper.trump_tracker()
     print("--------------------\n")
     print(f"Fetching additional articles for {args.ticker.upper()}.")
-    
+
     # Convert to DataFrame for further analysis if needed
     yahoo_news_df = pd.DataFrame(yahoo)
     finviz_news_df = pd.DataFrame(finviz)
     alpha_news_df = pd.DataFrame(alpha)
-
+    tmnt_news_df = pd.DataFrame(tmnt)
     # Merge all sources into single file
-    final_path = merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df)
-    
+    final_path = merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df, tmnt_news_df)
+    #Trump tracker is skipped on default until we decide how to handle it in the pipeline, so we can ignore the fact that it is not being merged in the default case
     print(f"All articles merged into single file: {final_path}")
     print(f"Processing completed for {args.ticker.upper()}")
 

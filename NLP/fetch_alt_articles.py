@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-from datetime import datetime
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -23,6 +22,30 @@ HEADERS = {
 }
 PATH = os.path.dirname(__file__) + "/articles"
 TRUTH_SOCIAL_ACTOR_ID = "sTDLfdZAmte0aYlxg"
+
+
+def normalize_timestamp(value):
+    """Convert many date-like inputs to a timezone-naive pandas Timestamp."""
+    if value is None:
+        return pd.NaT
+
+    # Handle objects like Arrow where .datetime carries the real datetime value.
+    if hasattr(value, "datetime"):
+        value = value.datetime
+
+    ts = pd.to_datetime(value, errors="coerce", utc=True)
+    if pd.isna(ts):
+        return pd.NaT
+    return ts.tz_convert(None)
+
+
+def normalize_published_date_column(df):
+    """Ensure DataFrame publishedDate column is pandas datetime."""
+    if df is None or df.empty or "publishedDate" not in df.columns:
+        return df
+    out = df.copy()
+    out["publishedDate"] = pd.to_datetime(out["publishedDate"], errors="coerce")
+    return out.dropna(subset=["publishedDate"])
 
 
 class ArticleScraper:
@@ -86,7 +109,7 @@ class ArticleScraper:
                 content = self.get_complete_sentences(full_content)
                 logging.debug(content)
                 return {
-                    "publishedDate": row["Date"],
+                    "publishedDate": normalize_timestamp(row.get("Date")),
                     "title": row["Title"],
                     "content": content,
                     "site": url,
@@ -187,13 +210,7 @@ class ArticleScraper:
             title = content.get("title", "N/A")
             summary = content.get("summary", "N/A")
             pub_date = content.get("pubDate", "N/A")
-            if pub_date != "N/A":
-                try:
-                    pub_date = datetime.strptime(
-                        pub_date.replace("T", " ").replace("Z", ""), "%Y-%m-%d %H:%M:%S"
-                    ).strftime("%Y-%m-%d %H:%M:%S")
-                except ValueError as e:
-                    print(f"Error parsing date {pub_date}: {e}")
+            pub_date = normalize_timestamp(None if pub_date == "N/A" else pub_date)
 
             canonical_url = content.get("canonicalUrl", {}).get("url", "N/A")
 
@@ -271,14 +288,7 @@ class ArticleScraper:
             summary = news.get("summary", "N/A")
             pub_date = news.get("time_published", "N/A")
 
-            # Format the timestamp from API format (e.g., "2025-12-31T11:30:10Z") to readable format
-            if pub_date != "N/A":
-                try:
-                    pub_date = datetime.strptime(
-                        pub_date.replace("T", "").replace("Z", ""), "%Y%m%d%H%M%S"
-                    ).strftime("%Y-%m-%d %H:%M:%S")
-                except ValueError as e:
-                    print(f"Error parsing date {pub_date}: {e}")
+            pub_date = normalize_timestamp(None if pub_date == "N/A" else pub_date)
 
             url = news.get("url", "N/A")
 
@@ -296,13 +306,11 @@ class ArticleScraper:
         api_key = os.getenv("APIFY_KEY")
         if not api_key:
             raise RuntimeError(
-                "Missing APIFY_KEY environment variable. Set APIFY_KEY in your environment or .env file before running trump_tracker()."
+                "Missing APIFY_KEY environment variable. Set APIFY_KEY in your .env file before running trump_tracker()."
             )
 
-        # Initialize the ApifyClient with your API token
         client = ApifyClient(api_key)
 
-        # Prepare the Actor input
         run_input = {
             "username": "realDonaldTrump",
             "maxPosts": 20,
@@ -323,62 +331,41 @@ class ArticleScraper:
                 return None
 
             return {
-                "publishedDate": post_dict.get("created_at"),
+                "publishedDate": normalize_timestamp(post_dict.get("created_at")),
                 "title": "Truth Social Post",
                 "content": content,
                 "site": post_dict.get("url"),
             }
 
-        posts = []
-        # Run the Actor and wait for it to finish
         try:
             run = client.actor(TRUTH_SOCIAL_ACTOR_ID).call(run_input=run_input)
         except Exception as e:
             logging.error(f"Failed to run Apify actor: {e}")
-            return []
-        # Fetch Actor results from the run's dataset (if there are any)
+            return
+
         if run and "defaultDatasetId" in run:
             for item in client.dataset(run["defaultDatasetId"]).iterate_items():
                 if isinstance(item, dict):
                     extracted_post = extract_post_from_dict(item)
                     if extracted_post:
-                        posts.append(extracted_post)
+                        yield extracted_post
                 elif isinstance(item, list):
                     for sub_item in item:
                         extracted_post = extract_post_from_dict(sub_item)
                         if extracted_post:
-                            posts.append(extracted_post)
-            return posts
+                            yield extracted_post
 
-        logging.warning("No dataset found in the run result")
-        return []
+        else:
+            logging.warning("No dataset found in the run result")
 
 
 def main():
     tracker_scraper = ArticleScraper("TRUMP")
     print("Getting trump tracker data...")
     try:
-        ttracker = tracker_scraper.trump_tracker()
+        tracker_scraper.trump_tracker()
     except RuntimeError as e:
         logging.warning(f"Skipping Trump Tracker scrape: {e}")
-        ttracker = []
-    except Exception as e:
-        logging.exception(f"Unexpected error while scraping Trump Tracker: {e}")
-        ttracker = []
-    print(f"Fetched {len(ttracker)} posts from Trump Tracker.")
-    ttracker_df = pd.DataFrame(ttracker)
-    ttracker_csv_path = f"{PATH}/trump_tracker.csv"
-    if ttracker_df.empty:
-        print("No posts returned.")
-    else:
-        ttracker_df["publishedDate"] = pd.to_datetime(
-            ttracker_df["publishedDate"], errors="coerce", utc=True
-        ).dt.tz_convert(None)
-        ttracker_df.to_csv(
-            ttracker_csv_path, index=False, date_format="%Y-%m-%d %H:%M:%S"
-        )
-        print(f"Saved Trump Tracker CSV to: {ttracker_csv_path}")
-    print("--------------------\n")
 
     for symbol in ["AAPL", "MSFT", "GOOGL"]:
         scraper = ArticleScraper(symbol)
@@ -388,9 +375,9 @@ def main():
         alpha = scraper.scrape_alpha()
 
         # Convert to DataFrame for further analysis if needed
-        yahoo_news_df = pd.DataFrame(yahoo)
-        finviz_news_df = pd.DataFrame(finviz)
-        alpha_news_df = pd.DataFrame(alpha)
+        yahoo_news_df = normalize_published_date_column(pd.DataFrame(yahoo))
+        finviz_news_df = normalize_published_date_column(pd.DataFrame(finviz))
+        alpha_news_df = normalize_published_date_column(pd.DataFrame(alpha))
 
         with open(f"{PATH}/{symbol}_yahoo_news.csv", "w", encoding="utf-8") as f:
             yahoo_news_df.to_csv(f, index=False, date_format="%Y-%m-%d %H:%M:%S")
