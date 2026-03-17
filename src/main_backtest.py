@@ -115,7 +115,7 @@ def _resolve_fast_mode_config(
 
 def main(
     portfolio_classes=None,
-    start_date="2025-01-01",
+    start_date="2024-01-01",
     end_date="2025-09-01",
     initial_capital=1000000.0,
     slippage=0,
