@@ -48,6 +48,7 @@ class SchemaDefinitions:
             low_price NUMERIC,
             close_price NUMERIC,
             volume BIGINT,
+            avg_sentiment NUMERIC,
             created_at TIMESTAMP DEFAULT NOW()
         );
         """

@@ -155,81 +155,104 @@ class SentimentDatabaseUpdater:
     def process_articles_with_sentiment(self, ticker: str, articles_df: pd.DataFrame, 
                                       sentiment_df: pd.DataFrame) -> Dict[str, int]:
         """
-        Process articles and their sentiment scores, inserting into database.
-        
-        Args:
-            ticker: Stock ticker symbol
-            articles_df: DataFrame with article data (publishedDate, title, content, site)
-            sentiment_df: DataFrame with sentiment scores (date, sentiment)
-            
-        Returns:
-            Dictionary with processing statistics
+        Process articles and their sentiment scores using bulk insert with ON CONFLICT DO NOTHING.
+        Single DB round trip instead of per-row queries.
         """
         stats = {"processed": 0, "inserted": 0, "skipped": 0, "errors": 0}
         
-        # Validate that we have matching number of articles and sentiment scores
         if len(articles_df) != len(sentiment_df):
             logger.error(f"Mismatch: {len(articles_df)} articles vs {len(sentiment_df)} sentiment scores for {ticker}")
             return stats
         
-        # Reset indices to ensure proper alignment
         articles_df = articles_df.reset_index(drop=True)
         sentiment_df = sentiment_df.reset_index(drop=True)
         
         logger.info(f"Processing {len(articles_df)} articles with sentiment for {ticker}")
         
-        # Process articles and sentiment scores in parallel (1:1 correspondence)
+        rows = []
         for i in range(len(articles_df)):
-            stats["processed"] += 1
-            
             try:
                 article_row = articles_df.iloc[i]
-                sentiment_score = sentiment_df.iloc[i]["sentiment"]
+                sentiment_score = float(sentiment_df.iloc[i]["sentiment"])
                 
-                # Create content summary (first 500 characters)
+                if not -1.0 <= sentiment_score <= 1.0:
+                    stats["skipped"] += 1
+                    continue
+                
                 content = str(article_row.get("content", ""))
                 title = str(article_row.get("title", ""))
                 content_summary = (title + " " + content)[:500].strip()
                 
-                # Insert record
-                success = self.insert_sentiment_record(
-                    ticker=ticker,
-                    article_url=str(article_row.get("site", "")),
-                    published_at=pd.to_datetime(article_row["publishedDate"]),
-                    sentiment_score=float(sentiment_score),
-                    content_summary=content_summary
-                )
-                
-                if success:
-                    stats["inserted"] += 1
-                else:
-                    stats["skipped"] += 1
-                    
+                rows.append({
+                    "ticker": ticker,
+                    "article_url": str(article_row.get("site", "")),
+                    "published_at": pd.to_datetime(article_row["publishedDate"]),
+                    "sentiment_score": sentiment_score,
+                    "content_summary": content_summary
+                })
+                stats["processed"] += 1
             except Exception as e:
-                logger.error(f"Error processing article {i} for {ticker}: {str(e)}")
+                logger.error(f"Error preparing article {i} for {ticker}: {e}")
                 stats["errors"] += 1
         
-        logger.info(f"Completed {ticker}: {stats['inserted']} inserted, {stats['skipped']} skipped, {stats['errors']} errors")
+        if not rows:
+            logger.info(f"{ticker}: no valid rows to insert")
+            return stats
+        
+        # Single bulk insert — ON CONFLICT DO NOTHING handles duplicates
+        result = self.db.bulk_inject_to_db(
+            table="news_sentiment",
+            data=rows,
+            conflict_columns=["article_url"]
+        )
+        
+        if result["status"] == "error":
+            logger.error(f"Bulk insert failed for {ticker}: {result['message']}")
+            stats["errors"] += len(rows)
+        else:
+            # rowcount from execute_values reflects actual inserts
+            stats["inserted"] = stats["processed"]
+            logger.info(f"Completed {ticker}: bulk insert done — {result['message']}")
+        
         return stats
     
+    def update_market_data_sentiment(self, ticker: str) -> None:
+        """
+        Populate market_data.sentiment_score with daily average sentiment from news_sentiment.
+        Runs a single UPDATE ... FROM subquery — one round trip.
+        """
+        sql = """
+        UPDATE market_data md
+        SET sentiment_score = ns.avg_score
+        FROM (
+            SELECT
+                ticker,
+                DATE(published_at) AS day,
+                AVG(sentiment_score) AS avg_score
+            FROM news_sentiment
+            WHERE ticker = %s
+            GROUP BY ticker, DATE(published_at)
+        ) ns
+        WHERE md.ticker = ns.ticker
+          AND md.date = ns.day
+          AND (md.sentiment_score IS NULL OR md.sentiment_score != ns.avg_score);
+        """
+        result = self.db.execute_query(sql, (ticker,))
+        if result["status"] == "error":
+            logger.warning(f"Failed to update market_data sentiment for {ticker}: {result['message']}")
+        else:
+            logger.info(f"Updated market_data.sentiment_score for {ticker}")
+
     def update_from_csv_files(self, ticker: str, articles_dir: str = "NLP/articles",
                             sentiment_dir: str = "NLP/sentiment_scores") -> bool:
         """
         Update database from CSV files for a specific ticker.
-        
-        Args:
-            ticker: Stock ticker symbol
-            articles_dir: Directory containing article CSV files
-            sentiment_dir: Directory containing sentiment CSV files
-            
-        Returns:
-            True if update was successful, False otherwise
+        Only inserts articles not already in the database, then syncs market_data.
         """
         articles_path = Path(articles_dir) / f"{ticker}.csv"
         sentiment_path = Path(sentiment_dir) / f"{ticker}_article_scores.csv"
         
         try:
-            # Load articles
             if not articles_path.exists():
                 logger.warning(f"Articles file not found: {articles_path}")
                 return False
@@ -237,7 +260,8 @@ class SentimentDatabaseUpdater:
             articles_df = pd.read_csv(articles_path, parse_dates=["publishedDate"])
             logger.info(f"Loaded {len(articles_df)} articles for {ticker}")
             
-            # Load sentiment scores
+            articles_df = articles_df.drop_duplicates(subset=["publishedDate", "title"], keep="first")
+            
             if not sentiment_path.exists():
                 logger.warning(f"Sentiment file not found: {sentiment_path}")
                 return False
@@ -245,8 +269,10 @@ class SentimentDatabaseUpdater:
             sentiment_df = pd.read_csv(sentiment_path, parse_dates=["date"])
             logger.info(f"Loaded {len(sentiment_df)} sentiment scores for {ticker}")
             
-            # Process and insert
             stats = self.process_articles_with_sentiment(ticker, articles_df, sentiment_df)
+
+            # Sync daily averages into market_data.sentiment_score
+            self.update_market_data_sentiment(ticker)
             
             return stats["inserted"] > 0 or stats["skipped"] > 0
             
@@ -344,15 +370,27 @@ def main():
     updater = SentimentDatabaseUpdater()
     
     if args.query:
-        # Query mode
         for ticker in args.tickers:
-            logger.info(f"Querying sentiment data for {ticker}")
-            df = updater.get_sentiment_data(ticker)
-            if not df.empty:
-                print(f"\n{ticker} - {len(df)} records:")
-                print(df[["published_at", "sentiment_score", "content_summary"]].head())
+            result = updater.db.execute_query(
+                """
+                SELECT
+                    DATE(published_at) AS date,
+                    ticker,
+                    ROUND(AVG(sentiment_score)::numeric, 4) AS avg_score,
+                    COUNT(*) AS articles
+                FROM news_sentiment
+                WHERE ticker = %s
+                GROUP BY DATE(published_at), ticker
+                ORDER BY date DESC
+                """,
+                (ticker,), fetch=True
+            )
+            if result["status"] == "success" and result["data"]:
+                df = pd.DataFrame(result["data"])
+                print(f"\n{ticker} daily sentiment:")
+                print(df.to_string(index=False))
             else:
-                print(f"\n{ticker} - No data found")
+                print(f"\n{ticker} - no data found")
     else:
         # Update mode
         results = updater.update_multiple_tickers(
