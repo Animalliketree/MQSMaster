@@ -197,11 +197,28 @@ class ArticleScraper:
         """
         Scrape latest news items for `symbol` from Yahoo Finance.
         Returns a DataFrame with columns [publishedDate,title, content, site]. Also writes CSV under NLP/articles.
+        Handles rate limiting with exponential backoff — returns empty on persistent failure.
         """
         import yfinance as yf
+        import time as _time
 
-        asset = yf.Ticker(self.symbol)
-        news = asset.news
+        news = []
+        for attempt in range(3):
+            try:
+                asset = yf.Ticker(self.symbol)
+                news = asset.news
+                break
+            except Exception as e:
+                if "rate limit" in str(e).lower() or "too many requests" in str(e).lower():
+                    wait = 30 * (2 ** attempt)  # 30s, 60s, 120s
+                    print(f"[{self.symbol}] Yahoo rate limited, waiting {wait}s (attempt {attempt+1}/3)...")
+                    _time.sleep(wait)
+                else:
+                    print(f"[{self.symbol}] Yahoo scrape error: {e}")
+                    return  # non-rate-limit error, give up immediately
+        else:
+            print(f"[{self.symbol}] Yahoo rate limit persists after 3 attempts, skipping Yahoo source")
+            return
         # Extract fields from each article
         for article in tqdm(
             news, desc="Scraping Yahoo News articles...", total=len(news)

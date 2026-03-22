@@ -105,7 +105,33 @@ class SentimentProcessor:
         df = df.drop_duplicates(subset=["publishedDate", "title"], keep="first")
         if len(df) < initial_count:
             logger.info(f"Removed {initial_count - len(df)} duplicate articles for {ticker}")
-        
+
+        # Only process articles not already scored
+        scores_path = csv_path.replace(
+            os.path.basename(csv_path),
+            f"../sentiment_scores/{ticker}_article_scores.csv"
+        )
+        scores_path = os.path.normpath(scores_path)
+        existing_scores_df = pd.DataFrame()
+        if os.path.exists(scores_path):
+            try:
+                existing_scores_df = pd.read_csv(scores_path, parse_dates=["date"])
+                already_scored = len(existing_scores_df)
+                df = df.iloc[already_scored:]  # skip already-processed rows
+                logger.info(f"Skipping {already_scored} already-scored articles for {ticker}, {len(df)} new to process")
+            except Exception:
+                pass
+
+        if df.empty:
+            logger.info(f"No new articles to score for {ticker}")
+            # Still need to return existing scores for daily aggregation
+            if not existing_scores_df.empty:
+                daily_scores_df = existing_scores_df.groupby(
+                    existing_scores_df["date"].dt.date, as_index=False
+                )["sentiment"].mean()
+                return existing_scores_df, daily_scores_df
+            return pd.DataFrame(), pd.DataFrame()
+
         # Prepare data for processing
         df["date"] = df["publishedDate"].dt.date
         texts = (df["content"].fillna("") + " " + df["title"].fillna("")).tolist()
@@ -160,10 +186,19 @@ class SentimentProcessor:
             return pd.DataFrame(), pd.DataFrame()
         
         # Create DataFrames
-        article_scores_df = pd.DataFrame(records, columns=["date", "sentiment"])
-        daily_scores_df = article_scores_df.groupby("date", as_index=False)["sentiment"].mean()
+        new_scores_df = pd.DataFrame(records, columns=["date", "sentiment"])
+
+        # Merge with existing scores if any
+        if not existing_scores_df.empty:
+            article_scores_df = pd.concat([existing_scores_df, new_scores_df], ignore_index=True)
+        else:
+            article_scores_df = new_scores_df
+
+        daily_scores_df = article_scores_df.groupby(
+            pd.to_datetime(article_scores_df["date"]).dt.date, as_index=False
+        )["sentiment"].mean()
         
-        logger.info(f"Computed sentiment for {ticker}: {len(article_scores_df)} article scores, {len(daily_scores_df)} daily scores")
+        logger.info(f"Computed sentiment for {ticker}: {len(new_scores_df)} new article scores, {len(daily_scores_df)} daily scores total")
         
         return article_scores_df, daily_scores_df
     
@@ -211,6 +246,55 @@ class SentimentProcessor:
             logger.error(f"Error processing ticker {ticker}: {e}")
             return False
     
+    def compute_average_sentiment(
+        self,
+        ticker: str,
+        start_date,
+        end_date,
+        scores_dir: str = "NLP/sentiment_scores",
+    ) -> Optional[float]:
+        """
+        Compute the average sentiment score for a ticker over a given timespan.
+        Reads from the pre-computed daily scores CSV.
+
+        Args:
+            ticker: Ticker symbol (e.g. "AAPL")
+            start_date: Start of the window (inclusive) — date, datetime, or str
+            end_date: End of the window (inclusive) — date, datetime, or str
+            scores_dir: Directory containing *_daily_scores.csv files
+
+        Returns:
+            Average sentiment as a float in [-1, 1], or None if no data exists
+            for the requested window.
+        """
+        daily_path = Path(scores_dir) / f"{ticker}_daily_scores.csv"
+        if not daily_path.exists():
+            logger.warning(f"No daily scores file found for {ticker}: {daily_path}")
+            return None
+
+        try:
+            df = pd.read_csv(daily_path, parse_dates=["date"])
+        except Exception as e:
+            logger.error(f"Failed to read daily scores for {ticker}: {e}")
+            return None
+
+        start = pd.Timestamp(start_date).normalize()
+        end = pd.Timestamp(end_date).normalize()
+
+        mask = (df["date"] >= start) & (df["date"] <= end)
+        window = df.loc[mask, "sentiment"]
+
+        if window.empty:
+            logger.info(f"No sentiment data for {ticker} between {start.date()} and {end.date()}")
+            return None
+
+        avg = float(window.mean())
+        logger.info(
+            f"Average sentiment for {ticker} [{start.date()} -> {end.date()}]: "
+            f"{avg:.4f} ({len(window)} days)"
+        )
+        return avg
+
     def process_multiple_tickers(self, tickers: List[str], articles_dir: str = "NLP/articles",
                                output_dir: str = "NLP/sentiment_scores") -> Dict[str, bool]:
         """
