@@ -1135,7 +1135,8 @@ def main():
     Main function to demonstrate RBP prediction pipeline.
     """
     # Example usage of RBPPipeline
-    fmp_api_key = "YOUR_FMP_API_KEY"
+    fmp_api_key = os.getenv("FMP_API_KEY")
+    
     feature_columns = [
         "past_return_21d",
         "past_return_63d",
@@ -1145,19 +1146,9 @@ def main():
     ]
     target_column = "target_return_21d"
     pipeline = RBPPipeline(fmp_api_key, feature_columns, target_column)
-    # 1. Load tickers from tickers.json in parent directory
-    script_dir = os.path.dirname(__file__)
-    # Look for tickers.json in the parent directory
-    ticker_file_path = os.path.abspath(
-        os.path.join(script_dir, "..", "src/orchestrator/backfill/tickers.json")
-    )
-    try:
-        with open(ticker_file_path, "r") as f:
-            tickers = json.load(f)
-    except Exception as e:
-        logging.error(f"Failed to load tickers from {ticker_file_path}: {e}")
-        return
-    # 2. Fetch and prepare data
+
+    tickers = ["AAPL", "MSFT", "GOOGL"]
+
     # Calculate lookback days from 2015-01-01 to 2023-12-31 (approximately 9 years)
     lookback_days = 365 * 9
 
