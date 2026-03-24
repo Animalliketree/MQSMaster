@@ -12,6 +12,8 @@ The system now runs every **5 minutes** with the following improvements:
 - **Batch 3**: NVDA, AMD
 - **2-minute intervals** between batches to avoid rate limiting
 
+**Example:**
+python -m NLP.fetch_articles AAPL 2025-12-01 2025-12-31
 ### 2. Integrated Pipeline
 Each ticker goes through:
 1. **Article Fetching**: `fetch_articles.py` scrapes from multiple sources and merges into single CSV
