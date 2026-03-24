@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+import pandas as pd
+
 from src.common.database.MQSDBConnector import MQSDBConnector
 from src.portfolios.portfolio_BASE.strategy import BasePortfolio
 
