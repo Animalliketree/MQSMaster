@@ -88,13 +88,13 @@ class RegimeAdaptiveStrategy(BasePortfolio):
         # --- Signal Parameters (tune these between runs) ---
         # ATR multiplier for VWAP fade bands. Higher = fewer but higher-conviction signals.
         # 1.0 triggers on routine intraday moves; 2.0 requires a meaningful dislocation.
-        self.ATR_BAND_MULT = 1.5
+        self.ATR_BAND_MULT = 1.1
 
-        # 10-day ROC, threshold increased to 1.5, filter out noise.
-        self.MOMENTUM_THRESHOLD = 1.5
+        # 10-day ROC, threshold increased to 1.0, filter out noise.
+        self.MOMENTUM_THRESHOLD = 1.3
 
         # Base trade confidence. Scales position size: 0.6 -> ~60% of one bar's allocation. 
-        self.BASE_CONF = 0.6
+        self.BASE_CONF = 0.65
 
         # Stop-loss multiplier: exit if price drops this many ATRs below the recorded entry.
         # 1.5 gives a buffer of roughly 1.5x the recent daily range before cutting the loss.

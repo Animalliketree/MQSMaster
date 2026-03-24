@@ -25,8 +25,8 @@ logging.basicConfig(
 
 def main(
     portfolio_classes=None,
-    start_date="2025-01-01",
-    end_date="2025-01-31",
+    start_date="2023-2-01",
+    end_date="2025-09-25",
     initial_capital=1000000.0,
     slippage=0,
 ):
@@ -35,11 +35,12 @@ def main(
     comment/uncomment the classes in the portfolio_classes list to run different strategies.
     """
     portfolio_classes = [
-        VolMomentum,
-#        MomentumStrategy,
-#        RegimeAdaptiveStrategy,
+#        VolMomentum,
+        #MomentumStrategy,
+        RegimeAdaptiveStrategy,
 #        TrendRotateStrategy,
 #        CrossoverRmiStrategy,
+#        VixMeanReversion,
     ]
 
     # DO NOT CHANGE BELOW THIS LINE
