@@ -29,6 +29,15 @@ import pandas as pd
 import requests
 from joblib import Parallel, delayed
 
+from typing import List, Dict, Any
+from src.portfolios.indicators.simple_moving_average import SimpleMovingAverage
+from src.portfolios.indicators.relative_strength_index import RelativeStrengthIndex
+from src.portfolios.indicators.relative_momentum_index import RelativeMomentumIndex
+from src.portfolios.indicators.rate_of_change import RateOfChange
+from src.portfolios.indicators.average_true_range import AverageTrueRange
+from src.portfolios.indicators.displaced_moving_average import DisplacedMovingAverage
+from src.portfolios.indicators.vwap import VWAP
+
 dotenv.load_dotenv()
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 
@@ -246,19 +255,29 @@ class FeatureEngineer:
     Transforms raw market data into predictive features and target variables.
 
     Creates momentum and volatility features from historical prices, along with
-    forward-looking target returns for supervised learning.
+    forward-looking target returns for supervised learning. Also computes
+    technical indicator features using the indicators module.
     """
 
     def engineer_features(self, market_data: pd.DataFrame) -> pd.DataFrame:
         """
         Engineer predictive features (X) and target variable (Y) from market data.
 
-        Predictive Features (X):
+        Predictive Features (X) - original:
         - past_return_21d: 1-month (21 trading days) past return
         - past_vol_21d: 1-month past volatility (standard deviation of daily returns)
         - past_return_63d: 3-month (63 trading days) past return
         - past_vol_63d: 3-month past volatility
         - past_return_252d: 1-year (252 trading days) past return
+
+        Indicator Features (X) - added:
+        - sma_21: 21-day Simple Moving Average of close price
+        - rsi_14: 14-period Relative Strength Index
+        - rmi_14: 14-period Relative Momentum Index (momentum_period=3)
+        - roc_21: 21-period Rate of Change
+        - atr_14: 14-period Average True Range
+        - dma_21: 21-period Displaced Moving Average (displacement=5)
+        - vwap_21: 21-period rolling VWAP
 
         Target Variable (Y):
         - target_return_21d: 1-month forward-looking return
@@ -306,6 +325,10 @@ class FeatureEngineer:
             grouped_by_ticker["close_price"].shift(-21) / data["close_price"] - 1
         )
 
+        # --- Technical Indicator Features ---
+        # Computed per-ticker using stateful indicator classes
+        data = self._add_indicator_features(data)
+
         # Remove rows with NaN values created by rolling windows or forward shifts
         data.dropna(inplace=True)
 
@@ -313,6 +336,58 @@ class FeatureEngineer:
             f"Feature engineering complete. {len(data)} rows remain after NaN removal."
         )
 
+        return data
+
+    def _add_indicator_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Compute indicator features per ticker and append to data.
+
+        Iterates through each ticker's rows in chronological order, feeding
+        each row into stateful indicator instances, then writes the resulting
+        values back into the DataFrame.
+
+        Args:
+            data: DataFrame sorted by [ticker, timestamp] with OHLCV columns
+
+        Returns:
+            DataFrame with additional indicator columns (NaN until indicator is ready)
+        """
+        indicator_cols = ["sma_21", "rsi_14", "rmi_14", "roc_21", "atr_14", "dma_21", "vwap_21"]
+        for col in indicator_cols:
+            data[col] = np.nan
+
+        for ticker, group in data.groupby("ticker"):
+            # Instantiate one set of indicators per ticker
+            indicators = {
+                "sma_21": SimpleMovingAverage(ticker, period=21),
+                "rsi_14": RelativeStrengthIndex(ticker, period=14),
+                "rmi_14": RelativeMomentumIndex(ticker, period=14, momentum_period=3),
+                "roc_21": RateOfChange(ticker, period=21),
+                "atr_14": AverageTrueRange(ticker, period=14),
+                "dma_21": DisplacedMovingAverage(ticker, period=21, displacement=5),
+                "vwap_21": VWAP(ticker, period=21),
+            }
+
+            for idx, row in group.iterrows():
+                ts = row["timestamp"]
+                close = row["close_price"]
+                high = row.get("high_price", close)
+                low = row.get("low_price", close)
+                volume = row.get("volume", 1.0)
+
+                indicators["sma_21"].Update(ts, close)
+                indicators["rsi_14"].Update(ts, close)
+                indicators["rmi_14"].Update(ts, close)
+                indicators["roc_21"].Update(ts, close)
+                indicators["atr_14"].Update(ts, close, high_price=high, low_price=low)
+                indicators["dma_21"].Update(ts, close)
+                indicators["vwap_21"].Update(ts, close, volume=volume)
+
+                for col, ind in indicators.items():
+                    if ind.IsReady:
+                        data.at[idx, col] = ind.Current
+
+        logging.info("Indicator features computed for all tickers.")
         return data
 
 
@@ -1138,21 +1213,30 @@ def main():
     fmp_api_key = os.getenv("FMP_API_KEY")
     
     feature_columns = [
+        # Original features
         "past_return_21d",
         "past_return_63d",
         "past_return_252d",
         "past_vol_21d",
         "past_vol_63d",
+        # Indicator features
+        "sma_21",
+        "rsi_14",
+        "rmi_14",
+        "roc_21",
+        "atr_14",
+        "dma_21",
+        "vwap_21",
     ]
     target_column = "target_return_21d"
     pipeline = RBPPipeline(fmp_api_key, feature_columns, target_column)
 
-    tickers = ["AAPL", "MSFT", "GOOGL"]
+    tickers = ["AAPL", "TSLA", "AMD", "MSFT", "NVDA", "^VIX", "TLT", "IEF", "GLD"]
 
-    # Calculate lookback days from 2015-01-01 to 2023-12-31 (approximately 9 years)
+    # 1. Calculate lookback days from 2015-01-01 to 2023-12-31 (approximately 9 years)
     lookback_days = 365 * 9
 
-    # Fetch data for all tickers at once
+    # 2. Fetch data for all tickers at once
     all_data = pipeline.data_fetcher.fetch_data(
         ticker_symbols=tickers, lookback_days=lookback_days
     )
