@@ -11,15 +11,16 @@ WORKDIR /app
 # Copy dependency files first for faster builds
 COPY pyproject.toml requirements.txt ./
 
-# Install dependencies (without editable install yet)
+# Install uv and dependencies
 RUN python -m pip install --upgrade pip \
-    && python -m pip install --no-cache-dir --only-binary :all: -r requirements.txt
+    && python -m pip install uv \
+    && uv pip install --no-cache-dir --only-binary :all: -r requirements.txt
 
 # Copy the rest of the project
 COPY . .
 
 # Install the project in editable mode (requires src/ to be present)
-RUN python -m pip install -e .
+RUN uv pip install -e .
 
 # Default command (runs the live trading entrypoint)
 CMD ["python", "-m", "src.main"]
