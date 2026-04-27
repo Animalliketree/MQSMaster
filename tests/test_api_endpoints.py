@@ -3,6 +3,12 @@ import pytest
 from datetime import datetime, timedelta
 from src.orchestrator.marketData.fmpMarketData import FMPMarketData
 
+pytestmark = [
+    pytest.mark.api,
+    pytest.mark.integration,
+    pytest.mark.workflow_nlp,
+]
+
 @pytest.fixture
 def start_date():
     start_date = (datetime.now() - timedelta(days=7))
