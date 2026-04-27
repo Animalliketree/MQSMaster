@@ -99,5 +99,3 @@ def test_debug_mode_runs_single_cycle(monkeypatch):
 
     assert portfolio._call_count == 1
     assert engine.failure_counts[portfolio.portfolio_id] == 0
-
-

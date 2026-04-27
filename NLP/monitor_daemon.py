@@ -7,6 +7,7 @@ Simple monitoring script for the NLP daemon to track performance and resource us
 import os
 import time
 import psutil
+import argparse
 from datetime import datetime
 from pathlib import Path
 
@@ -141,8 +142,66 @@ def monitor_daemon():
     
     print(f"\nLast updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+
+def run_synthetic_check(max_log_age_hours: int = 48) -> int:
+    """Run a lightweight CI-friendly health check.
+
+    Returns 0 for pass/warn states and 1 for hard-fail states.
+    """
+    stats = parse_log_stats()
+    daemon_proc = get_daemon_process()
+
+    result = {
+        "daemon_running": bool(daemon_proc),
+        "log_exists": LOG_FILE.exists(),
+        "total_cycles": stats.get("total_cycles", 0),
+        "successful_cycles": stats.get("successful_cycles", 0),
+        "failed_cycles": stats.get("failed_cycles", 0),
+        "status": "ok",
+        "reasons": [],
+    }
+
+    if LOG_FILE.exists():
+        age_hours = (time.time() - LOG_FILE.stat().st_mtime) / 3600
+        result["log_age_hours"] = round(age_hours, 2)
+        if age_hours > float(max_log_age_hours):
+            result["status"] = "warn"
+            result["reasons"].append(
+                f"daemon.log older than {max_log_age_hours}h"
+            )
+    else:
+        result["status"] = "warn"
+        result["reasons"].append("daemon.log not found")
+
+    total_cycles = int(result["total_cycles"])
+    failed_cycles = int(result["failed_cycles"])
+    successful_cycles = int(result["successful_cycles"])
+    if total_cycles >= 3 and failed_cycles > successful_cycles:
+        result["status"] = "failed"
+        result["reasons"].append("failed cycles exceed successful cycles")
+
+    print(result)
+    return 1 if result["status"] == "failed" else 0
+
 def main():
     """Main monitoring function."""
+    parser = argparse.ArgumentParser(description="Monitor NLP daemon health")
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Run CI-friendly synthetic checks and exit with status code",
+    )
+    parser.add_argument(
+        "--max-log-age-hours",
+        type=int,
+        default=48,
+        help="Warn when daemon.log age exceeds this threshold",
+    )
+    args = parser.parse_args()
+
+    if args.synthetic:
+        raise SystemExit(run_synthetic_check(max_log_age_hours=args.max_log_age_hours))
+
     try:
         monitor_daemon()
     except KeyboardInterrupt:
