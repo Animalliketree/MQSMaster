@@ -120,7 +120,10 @@ def test_run_same_window_previous_years_uses_existing_strategy_returns_when_pres
     for _, group in seasonal.overlay_data.groupby("year"):
         time_col = "date" if "date" in group.columns else "day"
         dates = pd.to_datetime(group[time_col])
-        src_returns = bt.data.loc[dates, "strategy_returns"].to_numpy(dtype=float)
+        src_returns = bt.data.loc[dates, "strategy_returns"].to_numpy(
+            dtype=float,
+            copy=True,
+        )
         if src_returns.size > 0:
             src_returns[0] = 0.0
         expected = np.cumprod(1.0 + src_returns) - 1.0
