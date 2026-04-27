@@ -21,7 +21,7 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import dotenv
 import numpy as np
@@ -29,7 +29,6 @@ import pandas as pd
 import requests
 from joblib import Parallel, delayed
 
-from typing import List, Dict, Any
 from src.portfolios.indicators.simple_moving_average import SimpleMovingAverage
 from src.portfolios.indicators.relative_strength_index import RelativeStrengthIndex
 from src.portfolios.indicators.relative_momentum_index import RelativeMomentumIndex
@@ -330,10 +329,11 @@ class FeatureEngineer:
         data = self._add_indicator_features(data)
 
         # Remove rows with NaN values created by rolling windows or forward shifts
+        before = len(data)
         data.dropna(inplace=True)
 
         logging.info(
-            f"Feature engineering complete. {len(data)} rows remain after NaN removal."
+            f"Feature engineering complete. {len(data)}/{before} rows remain after NaN removal."
         )
 
         return data
@@ -341,23 +341,15 @@ class FeatureEngineer:
     def _add_indicator_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Compute indicator features per ticker and append to data.
-
-        Iterates through each ticker's rows in chronological order, feeding
-        each row into stateful indicator instances, then writes the resulting
-        values back into the DataFrame.
-
-        Args:
-            data: DataFrame sorted by [ticker, timestamp] with OHLCV columns
-
-        Returns:
-            DataFrame with additional indicator columns (NaN until indicator is ready)
         """
         indicator_cols = ["sma_21", "rsi_14", "rmi_14", "roc_21", "atr_14", "dma_21", "vwap_21"]
         for col in indicator_cols:
             data[col] = np.nan
 
+        # Collect results per ticker into a dict of {idx: {col: value}}
+        results: Dict[Any, Dict[str, float]] = {}
+
         for ticker, group in data.groupby("ticker"):
-            # Instantiate one set of indicators per ticker
             indicators = {
                 "sma_21": SimpleMovingAverage(ticker, period=21),
                 "rsi_14": RelativeStrengthIndex(ticker, period=14),
@@ -370,10 +362,10 @@ class FeatureEngineer:
 
             for idx, row in group.iterrows():
                 ts = row["timestamp"]
-                close = row["close_price"]
-                high = row.get("high_price", close)
-                low = row.get("low_price", close)
-                volume = row.get("volume", 1.0)
+                close = float(row["close_price"])
+                high = float(row["high_price"]) if "high_price" in row.index and pd.notna(row["high_price"]) else close
+                low = float(row["low_price"]) if "low_price" in row.index and pd.notna(row["low_price"]) else close
+                volume = float(row["volume"]) if "volume" in row.index and pd.notna(row["volume"]) else 1.0
 
                 indicators["sma_21"].Update(ts, close)
                 indicators["rsi_14"].Update(ts, close)
@@ -383,11 +375,23 @@ class FeatureEngineer:
                 indicators["dma_21"].Update(ts, close)
                 indicators["vwap_21"].Update(ts, close, volume=volume)
 
+                row_vals = {}
                 for col, ind in indicators.items():
-                    if ind.IsReady:
-                        data.at[idx, col] = ind.Current
+                    if ind.IsReady and ind.Current is not None:
+                        row_vals[col] = ind.Current
+                if row_vals:
+                    results[idx] = row_vals
 
-        logging.info("Indicator features computed for all tickers.")
+        # Write all collected values back in one shot
+        for idx, col_vals in results.items():
+            for col, val in col_vals.items():
+                data.loc[idx, col] = val
+
+        # Log how many non-NaN values each indicator produced
+        for col in indicator_cols:
+            n_ready = data[col].notna().sum()
+            logging.info(f"  {col}: {n_ready} non-NaN values out of {len(data)} rows")
+
         return data
 
 
@@ -820,6 +824,7 @@ class RBPPredictor:
         self,
         feature_columns: List[str],
         censoring_quantiles: List[float] = [0.0, 0.2, 0.5, 0.8],
+        max_combination_size: Optional[int] = None,
     ):
         """
         Initialize RBP predictor.
@@ -827,28 +832,32 @@ class RBPPredictor:
         Args:
             feature_columns: List of feature names available for prediction
             censoring_quantiles: List of relevance thresholds to try
+            max_combination_size: Cap on feature subset size. None = all 2^K subsets.
+                                  E.g. 2 = only singles + pairs (fast).
         """
         self.feature_columns = feature_columns
         self.censoring_quantiles = censoring_quantiles
         self.num_features = len(feature_columns)
+        self.max_combination_size = max_combination_size or self.num_features
 
-        # Generate all non-empty feature combinations (2^K - 1)
+        # Generate feature combinations up to max_combination_size
         self.feature_combinations = self._generate_feature_combinations()
 
         logging.info(
             f"Initialized RBP predictor with {len(self.feature_combinations)} "
-            f"feature combinations and {len(censoring_quantiles)} thresholds"
+            f"feature combinations (max_size={self.max_combination_size}) "
+            f"and {len(censoring_quantiles)} thresholds"
         )
 
     def _generate_feature_combinations(self) -> List[Tuple[str, ...]]:
         """
-        Generate all possible non-empty subsets of features.
+        Generate feature subsets up to max_combination_size.
 
         Returns:
             List of tuples, each containing a combination of feature names
         """
         all_combinations = []
-        for subset_size in range(1, self.num_features + 1):
+        for subset_size in range(1, self.max_combination_size + 1):
             for combination in itertools.combinations(
                 self.feature_columns, subset_size
             ):
@@ -1048,6 +1057,7 @@ class RBPPipeline:
         fmp_api_key: str,
         feature_columns: List[str],
         target_column: str = "target_return_21d",
+        max_combination_size: Optional[int] = None,
     ):
         """
         Initialize RBP pipeline.
@@ -1056,12 +1066,13 @@ class RBPPipeline:
             fmp_api_key: API key for Financial Modeling Prep
             feature_columns: List of feature column names to use
             target_column: Name of target variable column
+            max_combination_size: Cap on feature subset size. None = all 2^K subsets.
         """
         self.data_fetcher = MarketDataFetcher(fmp_api_key)
         self.feature_engineer = FeatureEngineer()
         self.feature_columns = feature_columns
         self.target_column = target_column
-        self.predictor = RBPPredictor(feature_columns)
+        self.predictor = RBPPredictor(feature_columns, max_combination_size=max_combination_size)
         self.rbi_calculator = RBICalculator()
 
     def run_batch_predictions(
@@ -1093,7 +1104,7 @@ class RBPPipeline:
         task_items = list(test_features.iterrows())
 
         # Run predictions in parallel
-        parallel_results = Parallel(n_jobs=n_jobs, backend="loky")(
+        parallel_results = Parallel(n_jobs=n_jobs, backend="loky", verbose=10)(
             delayed(self._process_single_task)(
                 task_index, task_features, training_features, training_outcomes
             )
@@ -1209,6 +1220,8 @@ def main():
     """
     Main function to demonstrate RBP prediction pipeline.
     """
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
     # Example usage of RBPPipeline
     fmp_api_key = os.getenv("FMP_API_KEY")
     
@@ -1229,7 +1242,7 @@ def main():
         "vwap_21",
     ]
     target_column = "target_return_21d"
-    pipeline = RBPPipeline(fmp_api_key, feature_columns, target_column)
+    pipeline = RBPPipeline(fmp_api_key, feature_columns, target_column, max_combination_size=1) #mcs = None if you don't want to limit the size (takes too long)
 
     tickers = ["AAPL", "TSLA", "AMD", "MSFT", "NVDA", "^VIX", "TLT", "IEF", "GLD"]
 
