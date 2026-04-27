@@ -50,21 +50,59 @@ def _compute_sharpe_ratio(perf_df: pd.DataFrame) -> float:
     return float(sharpe_ratio)
 
 
+def _compute_annual_return(perf_df: pd.DataFrame) -> float:
+    """Calculates annualized return (CAGR) from a performance DataFrame."""
+    if perf_df.empty or "timestamp" not in perf_df or "portfolio_value" not in perf_df:
+        return 0.0
+
+    df = perf_df[["timestamp", "portfolio_value"]].copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df["portfolio_value"] = pd.to_numeric(df["portfolio_value"], errors="coerce")
+    df = df.dropna(subset=["timestamp", "portfolio_value"]).sort_values("timestamp")
+
+    if len(df) < 2:
+        return 0.0
+
+    start_value = float(df["portfolio_value"].iloc[0])
+    end_value = float(df["portfolio_value"].iloc[-1])
+
+    if not np.isfinite(start_value) or not np.isfinite(end_value) or start_value <= 0:
+        return 0.0
+
+    elapsed_days = (
+        df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]
+    ).total_seconds() / 86400.0
+    if elapsed_days <= 0:
+        return 0.0
+
+    annual_return = (end_value / start_value) ** (365.25 / elapsed_days) - 1.0
+    if not np.isfinite(annual_return):
+        return 0.0
+    return float(annual_return)
+
+
 def aggregate_final_metrics(perf_df: pd.DataFrame) -> pd.DataFrame:
     """Aggregates key metrics from perf_df."""
     if perf_df.empty or "portfolio_value" not in perf_df:
         return pd.DataFrame(columns=["metric", "value"])
     final_val = perf_df["portfolio_value"].iloc[-1]
     max_dd = _compute_max_drawdown(perf_df["portfolio_value"])
+    annual_return = _compute_annual_return(perf_df)
     sharpe = _compute_sharpe_ratio(perf_df)
     summary = pd.DataFrame(
         {
             "metric": [
                 "Final Portfolio Value",
                 "Max Drawdown (%)",
+                "Annual Return",
                 "Annualized Sharpe Ratio",
             ],
-            "value": [f"{final_val:,.2f}", f"{max_dd:.2%}", f"{sharpe:.3f}"],
+            "value": [
+                f"{final_val:,.2f}",
+                f"{max_dd:.2%}",
+                f"{annual_return:.2%}",
+                f"{sharpe:.3f}",
+            ],
         }
     )
     return summary
@@ -263,12 +301,12 @@ def _compute_return_correlations(
     return df[columns_to_analyze].corr()
 
 
-# TODO --- Portfolio Risk Calculation Helpers (Unchanged) ---
+# --- Portfolio Risk Calculation Helpers (Unchanged) ---
 
 
 def _calculate_portfolio_risk_components(
     full_historical_data: pd.DataFrame, portfolio_weights: Dict[str, float]
-) -> (pd.DataFrame, pd.Series, pd.DataFrame):
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Calculates risk components, returning the correlation matrix,
     individual volatilities, and weights DataFrame separately.

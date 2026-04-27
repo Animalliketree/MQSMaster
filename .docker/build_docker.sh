@@ -5,8 +5,8 @@ set -euo pipefail
 # [Task] Script for Docker Image: automate docker build -t trading-bot:latest .
 # Image tag to use (default is trading-bot:latest if you don't pass one).
 IMAGE_TAG="${1:-trading-bot:latest}"
-# Find the folder where this script lives (the repo root).
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Find the repo root (one level up from the .docker folder where this script lives).
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The Dockerfile should be in the repo root.
 DOCKERFILE="$ROOT_DIR/Dockerfile"
 

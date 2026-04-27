@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
-
+#Todo update!
 # Find the absolute path of the directory where the script is located.
 # This ensures that the script can be run from anywhere, including cron.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

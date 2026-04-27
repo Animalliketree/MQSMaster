@@ -12,8 +12,6 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-import pandas as pd
-
 from src.common.database.MQSDBConnector import MQSDBConnector
 from src.portfolios.portfolio_BASE.strategy import BasePortfolio
 
@@ -624,9 +622,10 @@ class BacktestEngine:
         """
         Initializes and runs the backtest for each portfolio.
         """
+        trade_logs = []
         if not self.portfolio_classes:
             self.logger.error("No portfolio classes provided to run backtests.")
-            return
+            return trade_logs
 
         for portfolio_class in self.portfolio_classes:
             try:
@@ -663,7 +662,7 @@ class BacktestEngine:
                         backtest_start_date=pd.to_datetime(self.start_date),
                     )
                     self.logger.info(
-                        f"--- Running backtest for portfolio: {portfolio_instance.portfolio_id} ---"
+                        f"\n--- Running backtest for portfolio: {portfolio_instance.portfolio_id} ---"
                     )
                     runner = BacktestRunner(
                         portfolio=portfolio_instance,
@@ -672,14 +671,15 @@ class BacktestEngine:
                         initial_capital=self.initial_capital,
                         slippage=self.slippage,
                     )
-                    runner.run()
-
+                    trade_log = runner.run()
+                    trade_logs.append(trade_log)
                 self.logger.info(
-                    f"--- Backtest for portfolio: {portfolio_instance.portfolio_id} finished ---"
+                    f"\n--- Backtest for portfolio: {portfolio_instance.portfolio_id} finished ---"
                 )
-
             except Exception as e:
                 self.logger.exception(
                     f"Error running backtest for {portfolio_class.__name__}: {e}",
                     exc_info=True,
                 )
+
+        return trade_logs
