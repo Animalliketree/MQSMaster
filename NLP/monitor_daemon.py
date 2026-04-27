@@ -154,6 +154,7 @@ def run_synthetic_check(max_log_age_hours: int = 48) -> int:
     """Run a lightweight CI-friendly health check.
 
     Returns 0 for pass/warn states and 1 for hard-fail states.
+    Stale logs are treated as hard-fail.
     """
     stats = parse_log_stats()
     daemon_proc = get_daemon_process()
@@ -172,7 +173,7 @@ def run_synthetic_check(max_log_age_hours: int = 48) -> int:
         age_hours = (time.time() - LOG_FILE.stat().st_mtime) / 3600
         result["log_age_hours"] = round(age_hours, 2)
         if age_hours > float(max_log_age_hours):
-            result["status"] = "warn"
+            result["status"] = "failed"
             result["reasons"].append(f"daemon.log older than {max_log_age_hours}h")
     else:
         result["status"] = "warn"

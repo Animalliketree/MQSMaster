@@ -276,7 +276,13 @@ jobs:
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
         run: |
-          python scripts/api_test.py --symbol AAPL
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "Production branch synthetic checks: requiring FMP_API_KEY."
+            python scripts/api_test.py --symbol AAPL --require-fmp
+          else
+            echo "Non-production branch synthetic checks: FMP_API_KEY missing is warning-only."
+            python scripts/api_test.py --symbol AAPL
+          fi
 
       - name: Synthetic NLP daemon checks
         run: |

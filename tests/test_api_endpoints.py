@@ -1,14 +1,24 @@
 # tests/test_api_endpoints.py
+import os
 from datetime import datetime, timedelta
 
 import pytest
 
 from src.orchestrator.marketData.fmpMarketData import FMPMarketData
 
+RUN_LIVE_API_TESTS = os.getenv("RUN_LIVE_API_TESTS", "").strip() == "1"
+
 pytestmark = [
     pytest.mark.api,
     pytest.mark.integration,
     pytest.mark.workflow_nlp,
+    pytest.mark.skipif(
+        not RUN_LIVE_API_TESTS,
+        reason=(
+            "Opt-in live API tests are disabled by default. "
+            "Set RUN_LIVE_API_TESTS=1 to run manually."
+        ),
+    ),
 ]
 
 
