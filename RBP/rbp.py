@@ -382,11 +382,10 @@ class FeatureEngineer:
                 if row_vals:
                     results[idx] = row_vals
 
-        # Write all collected values back in one shot
-        for idx, col_vals in results.items():
-            for col, val in col_vals.items():
-                data.loc[idx, col] = val
-
+        # Write all collected values back in one batch operation
+        if results:
+            updates_df = pd.DataFrame.from_dict(results, orient='index')
+            data.update(updates_df)
         # Log how many non-NaN values each indicator produced
         for col in indicator_cols:
             n_ready = data[col].notna().sum()
@@ -823,9 +822,11 @@ class RBPPredictor:
     def __init__(
         self,
         feature_columns: List[str],
-        censoring_quantiles: List[float] = [0.0, 0.2, 0.5, 0.8],
+        censoring_quantiles: Optional[List[float]] = None,
         max_combination_size: Optional[int] = None,
     ):
+        if censoring_quantiles is None:
+            censoring_quantiles = [0.0, 0.2, 0.5, 0.8]
         """
         Initialize RBP predictor.
 
@@ -1242,6 +1243,7 @@ def main():
         "vwap_21",
     ]
     target_column = "target_return_21d"
+    #? Use max_combination_size=1 for fast iteration; set to None for full 2^K subsets
     pipeline = RBPPipeline(fmp_api_key, feature_columns, target_column, max_combination_size=1) #mcs = None if you don't want to limit the size (takes too long)
 
     tickers = ["AAPL", "TSLA", "AMD", "MSFT", "NVDA", "^VIX", "TLT", "IEF", "GLD"]

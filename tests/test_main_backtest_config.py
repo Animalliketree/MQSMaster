@@ -50,7 +50,7 @@ def test_init_backtest_uses_available_defaults_when_none():
         backtest_mode="event",
     )
 
-    assert portfolio_classes == list(main_backtest.AVAILABLE_PORTFOLIO_CLASSES[:2])
+    assert portfolio_classes == list(main_backtest.AVAILABLE_PORTFOLIO_CLASSES[:2])#get first 2 classes as default
 
 
 def test_run_backtest_wires_engine_setup_and_execution(monkeypatch):

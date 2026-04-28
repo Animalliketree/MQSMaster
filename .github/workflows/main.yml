@@ -141,7 +141,7 @@ jobs:
               --include-glob "src/portfolios/strategy_api.py" \
               --include-glob "src/main_backtest.py"
           else
-            echo "scripts/check_per_file_coverage.py not found; skipping per-file coverage enforcement."
+            echo "::warning::scripts/check_per_file_coverage.py not found; skipping per-file coverage enforcement."
           fi
 
       - name: Upload coverage artifact
