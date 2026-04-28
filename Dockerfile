@@ -1,28 +1,41 @@
 # Base image aligned with CI Python version
-FROM python:3.11-slim
+FROM python:3.12-slim AS build
 
-# Keep Python logs unbuffered and avoid .pyc files
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+#install uv from official source
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
 
 # Set working directory inside the container
 WORKDIR /app
+# Keep Python logs unbuffered and avoid .pyc files
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
 
 # Copy dependency files first for faster builds
-COPY pyproject.toml requirements.txt ./app/
+COPY pyproject.toml requirements.txt ./
 
 # Install uv and dependencies
-RUN python -m pip install --upgrade pip \
-    && python -m --root-user-action pip install uv \
-    && uv venv MQS \
-    &&  MQS/bin/activate \
-    && uv pip install --no-cache-dir --only-binary :all: -r requirements.txt
-
-# Copy the rest of the project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-install-project --no-dev
+    # Copy the rest of the project
 COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
-# Install the project in editable mode (requires src/ to be present)
-RUN uv pip install -e .
+FROM python:3.12-slim AS runtime
 
+ENV PATH="/app:${PATH}" \
+    PYTHONPATH="/app" \
+    UV_LINK_MODE=copy
+
+RUN groupadd -g 1001 appgroup && \
+    useradd -u 1001 -g appgroup -m -d /app -s /bin/bash appuser
+
+WORKDIR /app
+
+COPY --from=build --chown=appuser:appgroup /app .
+
+USER appuser
 # Default command (runs the live trading entrypoint)
 CMD ["python", "-m", "src.main"]
