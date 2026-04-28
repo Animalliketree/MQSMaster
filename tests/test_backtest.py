@@ -9,15 +9,17 @@ from src.portfolios.portfolio_1.strategy import VolMomentum
 from src.portfolios.portfolio_2.strategy import MomentumStrategy
 from src.portfolios.portfolio_3.strategy import RegimeAdaptiveStrategy
 
+_BASE_START = datetime(2024, 1, 1)
 
 @pytest.fixture
 def start_date():
-    return datetime(2024, 1, 1).strftime("%Y-%m-%d")
+    return _BASE_START.strftime("%Y-%m-%d")
+
 
 
 @pytest.fixture
 def end_date():
-    start = datetime(2024, 1, 1)
+    start = _BASE_START
     end = start + timedelta(days=90)
     return end.strftime("%Y-%m-%d")
 
@@ -26,7 +28,7 @@ def end_date():
     "portfolio_class",
     [VolMomentum, MomentumStrategy, RegimeAdaptiveStrategy],
 )
-def test_init_backtest_preserves_selected_portfolio(
+def test_init_backtest_preserves_all_inputs(
     portfolio_class,
     start_date,
     end_date,

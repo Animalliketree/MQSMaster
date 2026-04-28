@@ -8,7 +8,7 @@ import argparse
 import time
 from datetime import datetime
 from pathlib import Path
-
+import json
 import psutil
 
 SCRIPT_DIR = Path(__file__).parent
@@ -19,7 +19,8 @@ def get_daemon_process():
     """Find the daemon process if it's running."""
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
-            if "python" in proc.info["name"].lower() and proc.info["cmdline"]:
+            name = proc.info["name"] or ""
+            if "python" in name.lower() and proc.info["cmdline"]:
                 cmdline = " ".join(proc.info["cmdline"])
                 if "daemon.py start" in cmdline:
                     return psutil.Process(proc.info["pid"])
@@ -31,7 +32,16 @@ def get_daemon_process():
 def parse_log_stats():
     """Parse the daemon log to extract statistics."""
     if not LOG_FILE.exists():
-        return {}
+        return {
+                "total_cycles": 0,
+                "successful_cycles": 0,
+                "failed_cycles": 0,
+                "skipped_tickers": 0,
+                "processed_tickers": 0,
+                "last_cycle_time": None,
+                "average_cycle_time": 0,
+                "skip_rate": 0,
+        }
 
     stats = {
         "total_cycles": 0,
@@ -186,7 +196,7 @@ def run_synthetic_check(max_log_age_hours: int = 48) -> int:
         result["status"] = "failed"
         result["reasons"].append("failed cycles exceed successful cycles")
 
-    print(result)
+    print(json.dumps(result))
     return 1 if result["status"] == "failed" else 0
 
 

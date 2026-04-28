@@ -61,7 +61,7 @@ def test_failure_counter_resets_after_recovery(monkeypatch):
 
     engine._run_portfolio(portfolio)
 
-    assert portfolio._call_count >= 2
+    assert portfolio._call_count == 2
     assert engine.failure_counts[portfolio.portfolio_id] == 0
 
 
