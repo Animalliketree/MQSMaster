@@ -41,6 +41,7 @@ def _build_executor(price_map, record):
                 "signal_type": signal_type,
                 "quantity": quantity_to_trade,
                 "updated_cash": updated_cash,
+                "updated_quantity": updated_quantity,
                 "exec_price": exec_price,
                 "port_notional": port_notional,
                 "timestamp": timestamp,
@@ -81,14 +82,15 @@ def test_buying_power_calculation():
     assert buying_power == pytest.approx(1000.0)
 
 
-def test_order_sizing_limits_skip_small_trade():
+@pytest.mark.parametrize("signal_type", ["BUY", "SELL"])
+def test_order_sizing_limits_skip_small_trade(signal_type):
     record = []
     executor = _build_executor({"AAPL": 100.0}, record)
 
     result = executor.execute_trade(
         portfolio_id="p1",
         ticker="AAPL",
-        signal_type="BUY",
+        signal_type=signal_type,
         confidence=1.0,
         arrival_price=100.0,
         cash=10000.0,
@@ -102,14 +104,15 @@ def test_order_sizing_limits_skip_small_trade():
     assert record == []
 
 
-def test_position_weight_limits_respected():
+@pytest.mark.parametrize("signal_type", ["BUY", "SELL"])
+def test_position_weight_limits_respected(signal_type):
     record = []
     executor = _build_executor({"AAPL": 100.0}, record)
 
     result = executor.execute_trade(
         portfolio_id="p1",
         ticker="AAPL",
-        signal_type="BUY",
+        signal_type=signal_type,
         confidence=1.0,
         arrival_price=100.0,
         cash=10000.0,
@@ -124,16 +127,26 @@ def test_position_weight_limits_respected():
     trade = record[0]
     trade_value = trade["quantity"] * trade["exec_price"]
     assert trade_value <= 2500.0
+    assert trade["signal_type"] == signal_type
 
 
-def test_trade_execution_happy_path():
+@pytest.mark.parametrize(
+    "signal_type, expected_updated_cash, expected_updated_quantity",
+    [
+        ("BUY", 500.0, 50.0),
+        ("SELL", 1500.0, -50.0),
+    ],
+)
+def test_trade_execution_happy_path(
+    signal_type, expected_updated_cash, expected_updated_quantity
+):
     record = []
     executor = _build_executor({"AAPL": 10.0}, record)
 
     result = executor.execute_trade(
         portfolio_id="p1",
         ticker="AAPL",
-        signal_type="BUY",
+        signal_type=signal_type,
         confidence=1.0,
         arrival_price=10.0,
         cash=1000.0,
@@ -145,5 +158,9 @@ def test_trade_execution_happy_path():
 
     assert result is not None
     assert result["quantity"] == 50
-    assert result["updated_cash"] == pytest.approx(500.0)
+    assert result["updated_cash"] == pytest.approx(expected_updated_cash)
+    assert record[0]["signal_type"] == signal_type
+    assert record[0]["quantity"] == 50
+    assert record[0]["updated_cash"] == pytest.approx(expected_updated_cash)
+    assert record[0]["updated_quantity"] == pytest.approx(expected_updated_quantity)
     assert record

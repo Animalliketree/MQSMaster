@@ -491,10 +491,12 @@ class BacktestEngine:
             if portfolio_weights:
                 # Reshape historical_daily to the format expected by reporting helpers:
                 # DataFrame with columns: timestamp, ticker, close_price
-                risk_data = historical_daily[["timestamp", "ticker", "close_price"]].copy()
+                risk_data = historical_daily[
+                    ["timestamp", "ticker", "close_price"]
+                ].copy()
 
-                corr_matrix, indiv_vols, weights_df = _calculate_portfolio_risk_components(
-                    risk_data, portfolio_weights
+                corr_matrix, indiv_vols, weights_df = (
+                    _calculate_portfolio_risk_components(risk_data, portfolio_weights)
                 )
                 if not corr_matrix.empty:
                     aligned_weights_df = weights_df[
@@ -541,24 +543,28 @@ class BacktestEngine:
             )
             composition_df = pd.DataFrame({"timestamp": weights.index})
             for ticker in selected_tickers:
-                ticker_weight = lagged_weights[ticker].reindex(weights.index).fillna(0.0)
+                ticker_weight = (
+                    lagged_weights[ticker].reindex(weights.index).fillna(0.0)
+                )
                 composition_df[f"{ticker}_value"] = (
-                    ticker_weight.values * portfolio_value_series.reindex(weights.index).values
+                    ticker_weight.values
+                    * portfolio_value_series.reindex(weights.index).values
                 )
             total_allocated = composition_df[
                 [c for c in composition_df.columns if c.endswith("_value")]
             ].sum(axis=1)
             composition_df["cash_value"] = (
-                portfolio_value_series.reindex(weights.index).values - total_allocated.values
+                portfolio_value_series.reindex(weights.index).values
+                - total_allocated.values
             )
             composition_df["portfolio_value"] = portfolio_value_series.reindex(
                 weights.index
             ).values
             composition_df.to_csv(
-                os.path.join(out_dir, "performance_timeseries_minute_by_minute.csv"),
+                os.path.join(out_dir, "portfolio_composition_daily.csv"),
                 index=False,
             )
-            self.logger.info("Saved performance_timeseries_minute_by_minute.csv (daily approximation)")
+            self.logger.info("Saved portfolio_composition_daily.csv")
         except Exception as e:
             self.logger.error(
                 "Error generating composition timeseries: %s", e, exc_info=True
