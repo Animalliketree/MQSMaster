@@ -2,7 +2,7 @@
 FROM python:3.12-slim AS build
 
 #install uv from official source
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # Set working directory inside the container
 WORKDIR /app
@@ -15,19 +15,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Copy dependency files first for faster builds
 COPY pyproject.toml requirements.txt ./
 
-# Install uv and dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-install-project --no-dev
-    # Copy the rest of the project
-COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+# Install system build deps, uv and Python dependencies
+RUN uv venv MQS && \
+    . MQS/bin/activate && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install uv && \
+    uv pip install --no-cache-dir --only-binary :all: -r requirements.txt
+# Copy the rest of the project
+COPY . /app
+RUN . MQS/bin/activate && \
+    uv pip install -e .
+
 
 FROM python:3.12-slim AS runtime
 
-ENV PATH="/app:${PATH}" \
-    PYTHONPATH="/app" \
-    UV_LINK_MODE=copy
+ENV PYTHONPATH="/app" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+# Add the venv’s bin directory to PATH so its python and scripts are used
+ENV PATH="/app/MQS/bin:$PATH"
 
 RUN groupadd -g 1001 appgroup && \
     useradd -u 1001 -g appgroup -m -d /app -s /bin/bash appuser

@@ -22,7 +22,7 @@ class MQSDBConnector:
     def __init__(self):
         # Read environment variables for DB credentials
         self.db_host = os.getenv('host')
-        self.db_port = int(os.getenv('port'))
+        self.db_port = int(os.getenv('port')) if os.getenv('port') else 0
         self.db_name = os.getenv('database')
         self.db_user = os.getenv('db_user')
         self.db_password = os.getenv('password')
