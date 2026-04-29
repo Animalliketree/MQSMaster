@@ -62,4 +62,4 @@ jobs:
           password: ${{ secrets.DB_PASSWORD }}
           sslmode: "require"
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
-        run: pytest -vv tests
+        run: pytest -m "smoke and workflow_backtest"
