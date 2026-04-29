@@ -64,9 +64,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir --only-binary :all: -r requirements.txt
-          python -m pip install -e .
-          python -m pip install ruff pytest pytest-cov pip-audit
+          pip install uv
+          uv pip install flake8 pytest ruff pytest pytest-cov pip-audit --system 
+          if [ -f requirements.txt ]; then uv pip install --no-cache-dir --only-binary :all: -r requirements.txt --system ; fi
+          # If you have a pyproject.toml / setup.cfg, this installs your package
+          if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then uv pip install -e . --system; fi
     
       # Lint (fast checks)
       - name: Lint (ruff)
