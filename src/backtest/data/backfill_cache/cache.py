@@ -81,6 +81,7 @@ def missing_ranges(
     if cached.empty:
         return [(start, end)]
 
+    cached["timestamp"] = pd.to_datetime(cached["timestamp"])
     cached_min = cached["timestamp"].min()
     cached_max = cached["timestamp"].max()
 
