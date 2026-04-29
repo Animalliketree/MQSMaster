@@ -1,75 +1,14 @@
+from collections import defaultdict
 from datetime import datetime
 
 import pandas as pd
 
 from src.portfolios.portfolio_BASE.strategy import BasePortfolio
 
-
-def fetch_historical_data(
-    portfolio: BasePortfolio, start_date: datetime, end_date: datetime
-) -> pd.DataFrame:
-    """
-    Fetches historical market data for the portfolio's tickers within the date range.
-    """
-    logger = portfolio.logger
-    tickers = getattr(portfolio, "tickers", [])
-
-    if not tickers:
-        logger.warning(
-            "No tickers specified in the portfolio; returning empty DataFrame."
-        )
-        return pd.DataFrame()
-
-    placeholders = ", ".join(["%s"] * len(tickers))
-    sql = f"""
-        SELECT *
-          FROM market_data
-         WHERE ticker IN ({placeholders})
-           AND timestamp BETWEEN %s AND %s
-         ORDER BY timestamp ASC
-    """
-    params = tickers + [start, end]
-    logger.debug("DB query for %d tickers from %s to %s", len(tickers), start, end)
-
-    try:
-        result = portfolio.db.execute_query(sql, params, fetch=True)
-    except Exception as e:
-        logger.exception(f"Database query exception: {e}", exc_info=True)
-        return pd.DataFrame()
-
-    if result.get("status") != "success":
-        msg = result.get("message", "<no message>")
-        logger.error(f"Database query failed: {msg}")
-        return pd.DataFrame()
-
-    raw_data = result.get("data", [])
-    if not raw_data:
-        logger.warning("Historical data query returned no rows.")
-        return pd.DataFrame()
-
-    df = pd.DataFrame(raw_data)
-
-    # Add timestamp column to df in NY timezone
-    df["timestamp"] = pd.to_datetime(
-        df["timestamp"], utc=True, errors="coerce"
-    ).dt.tz_convert("America/New_York")
-
-    # Step 3: Convert all numeric columns.
-    numeric_cols = ["open_price", "high_price", "low_price", "close_price", "volume"]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # --- End of Corrected Logic ---
-
-    # Step 4: Drop any rows that failed coercion in the steps above.
-    before_drop = len(df)
-    df.dropna(subset=["timestamp", "ticker", "close_price"], inplace=True)
-    dropped = before - len(df)
-    if dropped:
-        logger.warning("Dropped %d rows with invalid values after DB fetch.", dropped)
-
-    return df
+from .data.backfill_cache import cache as _cache
+from .data.backfill_cache.cache import load as _fetch_from_db
+from .data.backfill_cache.cache import missing_ranges as _missing_ranges
+from .data.backfill_cache.cache import save as _save_to_cache
 
 
 def fetch_historical_data(
@@ -97,9 +36,9 @@ def fetch_historical_data(
         return pd.DataFrame()
 
     # Initialize start and end dates
-    start = pd.Timestamp(start_date)
+    start = pd.to_datetime(start_date, utc=True)
     # Ensure end date includes the entire end day, up until close
-    end = pd.Timestamp(end_date) + pd.Timedelta(hours=23, minutes=59, seconds=59)
+    end = pd.to_datetime(end_date, utc=True) + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
     # Load any available ticker data from local cache
     caches = {t: _cache.load(t) for t in tickers}
