@@ -45,32 +45,33 @@ def parse_args():
     )
     p.add_argument("ticker", help="The ticker symbol to fetch (e.g., AAPL).")
     p.add_argument(
-        "start_date",
-        help="Start date for fetching articles, in YYYY-MM-DD format.")
+        "start_date", help="Start date for fetching articles, in YYYY-MM-DD format."
+    )
     p.add_argument(
-        "end_date",
-        help="End date for fetching articles, in YYYY-MM-DD format.")
-    p.add_argument("--trump_tracker",
-                   help="Include Trump truth social post?(True/False)",
-                   type=bool,
-                   default=False,
-                   required=False
-                )
+        "end_date", help="End date for fetching articles, in YYYY-MM-DD format."
+    )
+    p.add_argument(
+        "--trump_tracker",
+        help="Include Trump truth social post?(True/False)",
+        type=bool,
+        default=False,
+        required=False,
+    )
     return p.parse_args()
 
 
 # ─── FUNCTIONS ────────────────────────────────────────────────────────────────
-#TODO: Implement content scraping if needed
+# TODO: Implement content scraping if needed
 def scrape_article_content(symbol):
     """
     Scrape the full article content from the given URL using Selenium and BeautifulSoup.
     Returns the article text or an empty string if scraping fails.
     """
 
-    url = f'https://finance.yahoo.com/quote/{symbol}/news'
+    url = f"https://finance.yahoo.com/quote/{symbol}/news"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-        }
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+    }
 
     try:
         import requests
@@ -82,7 +83,7 @@ def scrape_article_content(symbol):
     try:
         resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        soup = BeautifulSoup(resp.text, "html.parser")
 
         articles = soup.find_all("li", {"class": "js-stream-content"})
         article_texts = []
@@ -96,6 +97,8 @@ def scrape_article_content(symbol):
     except Exception as e:
         print(f"Error scraping {url}: {e}")
     return ""
+
+
 #############################################################################
 def fetch_news(symbol, start_date, end_date, start_page=0):
     """
@@ -113,7 +116,6 @@ def fetch_news(symbol, start_date, end_date, start_page=0):
         except requests.RequestException as e:
             print(f"[{symbol}] Request error on page {page}: {e}")
             break
-
 
         if not news:
             print(f"[{symbol}] No more articles found from API.")
@@ -163,6 +165,8 @@ def fetch_news(symbol, start_date, end_date, start_page=0):
         )
 
     return all_articles, hit_max_pages, next_start_page
+
+
 def save_fetch_state(ticker, next_start_page, start_date, end_date):
     """Save fetch state to JSON file"""
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -288,11 +292,12 @@ def remove_duplicates(*kwargs):
     )
     return combined
 
+
 def merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df, tmnt_news_df):
     """Merge all article sources into a single CSV file per ticker."""
     path = os.path.dirname(__file__) + "/articles"
     fmp_path = f"{path}/{args.ticker.upper()}.csv"
-    
+
     # Load existing FMP data if it exists
     try:
         fmp_df = pd.read_csv(fmp_path, parse_dates=["publishedDate"])
@@ -301,22 +306,22 @@ def merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df, tmnt_n
     except FileNotFoundError:
         print(f"No existing FMP data found for {args.ticker.upper()}")
         fmp_df = pd.DataFrame()
-    
+
     # Combine all sources
     all_dataframes = []
-    
+
     if not fmp_df.empty:
         all_dataframes.append(fmp_df)
         print(f"FMP articles: {len(fmp_df)}")
-    
+
     if not yahoo_news_df.empty:
         all_dataframes.append(yahoo_news_df)
         print(f"Yahoo articles: {len(yahoo_news_df)}")
-    
+
     if not finviz_news_df.empty:
         all_dataframes.append(finviz_news_df)
         print(f"Finviz articles: {len(finviz_news_df)}")
-    
+
     if not alpha_news_df.empty:
         all_dataframes.append(alpha_news_df)
         print(f"Alpha Vantage articles: {len(alpha_news_df)}")
@@ -326,15 +331,16 @@ def merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df, tmnt_n
     if not all_dataframes:
         print(f"No articles found for {args.ticker.upper()}")
         return fmp_path
-    
+
     # Merge all sources
     combined_df = remove_duplicates(*all_dataframes)
-    
+
     # Save the merged file
     combined_df.to_csv(fmp_path, index=False, date_format="%Y-%m-%d %H:%M:%S")
     print(f"Saved merged articles to {fmp_path}: {len(combined_df)} total articles")
-    
+
     return fmp_path
+
 
 def main():
     """Main function to parse arguments and initiate the fetch."""
@@ -366,8 +372,10 @@ def main():
     alpha_news_df = pd.DataFrame(alpha)
     tmnt_news_df = pd.DataFrame(tmnt)
     # Merge all sources into single file
-    final_path = merge_all_sources(args, yahoo_news_df, finviz_news_df, alpha_news_df, tmnt_news_df)
-    #Trump tracker is skipped on default until we decide how to handle it in the pipeline, so we can ignore the fact that it is not being merged in the default case
+    final_path = merge_all_sources(
+        args, yahoo_news_df, finviz_news_df, alpha_news_df, tmnt_news_df
+    )
+    # Trump tracker is skipped on default until we decide how to handle it in the pipeline, so we can ignore the fact that it is not being merged in the default case
     print(f"All articles merged into single file: {final_path}")
     print(f"Processing completed for {args.ticker.upper()}")
 
