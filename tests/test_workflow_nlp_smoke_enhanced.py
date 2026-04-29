@@ -72,6 +72,20 @@ def test_deduplication_logic():
     combined = fetch_articles.remove_duplicates(df1, df2)
     assert len(combined) == 2
 
+    duplicate_rows = combined[combined["title"] == "Duplicate"]
+    assert len(duplicate_rows) == 1
+    duplicate_row = duplicate_rows.iloc[0]
+    assert duplicate_row["publishedDate"] == base_time
+    assert duplicate_row["site"] == "site-a"
+    assert duplicate_row["content"] == "A"
+
+    unique_rows = combined[combined["title"] == "Unique"]
+    assert len(unique_rows) == 1
+    unique_row = unique_rows.iloc[0]
+    assert unique_row["publishedDate"] == base_time
+    assert unique_row["site"] == "site-c"
+    assert unique_row["content"] == "C"
+
 
 def test_fetch_articles_cli_parsing(monkeypatch):
     argv = ["fetch_articles.py", "AAPL", "2025-01-01", "2025-01-02"]

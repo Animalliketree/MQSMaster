@@ -19,7 +19,7 @@ def _feed_indicator(indicator, prices):
         indicator.Update(ts, price)
 
 
-def test_rmi_with_real_backtest_data():
+def test_rmi_becomes_ready_and_within_range():
     rmi = RelativeMomentumIndex("AAPL", period=14, momentum_period=3)
     prices = [100 + (i * 0.3) for i in range(50)]
     _feed_indicator(rmi, prices)

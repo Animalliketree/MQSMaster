@@ -10,14 +10,17 @@ ALPHA_KEY = os.getenv("ALPHA_KEY")
 
 
 def scrape_alpha(
-    ticker=["AAPL"],
+    ticker=None,
     time_from="20251201T1200",
     time_to="20251231T1200",
     apikey=ALPHA_KEY,
 ):
+    if ticker is None:
+        ticker = ["AAPL"]
     url = f"https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={','.join(ticker)}&time_from={time_from}&time_to={time_to}&apikey={apikey}"
 
-    r = requests.get(url)
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
     news = r.json()
     for news in tqdm(
         news.get("feed", []),
@@ -31,12 +34,14 @@ def scrape_alpha(
         # Format the timestamp from API format (e.g., "20251231T120000Z") to readable format
         if pub_date != "N/A":
             try:
-                pub_date = datetime.strptime(pub_date, "%Y%m%dT%H%M%S").strftime(
+                # Strip trailing 'Z' if present
+                pub_date_clean = pub_date.rstrip("Z")
+                pub_date = datetime.strptime(pub_date_clean, "%Y%m%dT%H%M%S").strftime(
                     "%Y-%m-%d %H:%M:%S"
                 )
             except ValueError as e:
                 print(f"Error parsing date {pub_date}: {e}")
-                
+
         url = news.get("url", "N/A")
 
         yield {
