@@ -109,10 +109,10 @@ def fetch_historical_data(
         )
         return pd.DataFrame()
 
-    # Initialize start and end dates
-    start = pd.Timestamp(start_date)
-    # Ensure end date includes the entire end day, up until close
-    end = pd.Timestamp(end_date) + pd.Timedelta(hours=23, minutes=59, seconds=59)
+    # Initialize start and end dates as timezone-aware (UTC) to avoid tz-naive/tz-aware comparisons
+    start = pd.to_datetime(start_date, utc=True)
+    # Ensure end date includes the entire end day, up until close (timezone-aware)
+    end = pd.to_datetime(end_date, utc=True) + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
     # Load any available ticker data from local cache
     caches = {t: _cache.load(t) for t in tickers}
