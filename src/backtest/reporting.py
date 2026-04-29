@@ -126,6 +126,8 @@ def _generate_minute_by_minute_performance(
     price_pivot = full_historical_data.pivot(
         index="timestamp", columns="ticker", values="close_price"
     )
+    price_pivot.index = pd.to_datetime(price_pivot.index, errors="coerce")
+    price_pivot = price_pivot[price_pivot.index.notna()].sort_index()
     minute_prices = price_pivot.resample("min").ffill().bfill()
 
     if not trade_log:
@@ -196,6 +198,8 @@ def _generate_buy_and_hold_benchmark(
     price_pivot = full_historical_data.pivot(
         index="timestamp", columns="ticker", values="close_price"
     )
+    price_pivot.index = pd.to_datetime(price_pivot.index, errors="coerce")
+    price_pivot = price_pivot[price_pivot.index.notna()].sort_index()
     minute_prices = price_pivot.resample("min").ffill().bfill()
 
     first_day_prices = minute_prices.iloc[0]
