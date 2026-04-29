@@ -229,7 +229,6 @@ def update_ticker_csv(symbol, start_date_str, end_date_str):
         # Fetch articles from current start page
         articles, hit_max_pages, next_page = fetch_news(
             symbol, user_start, user_end, start_page
-            symbol, user_start, user_end, start_page
         )
 
         # Update CSV if we found articles
