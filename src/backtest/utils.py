@@ -1,82 +1,69 @@
-from collections import defaultdict
 from datetime import datetime
-from typing import List
 
 import pandas as pd
 
-from src.backtest.data.backfill_cache import cache as _cache
 from src.portfolios.portfolio_BASE.strategy import BasePortfolio
 
 
-def _fetch_from_db(portfolio, tickers: List[str], start, end) -> pd.DataFrame:
+def fetch_historical_data(
+    portfolio: BasePortfolio, start_date: datetime, end_date: datetime
+) -> pd.DataFrame:
     """
-    Fetches market data for the specified ticker(s) within the specified date range.
-
-    sql logic:
-    SELECT for specified tickers:
-        timestamps for all tickers, sorted by newest, take newest for each, gives last timestamp of the day
-        all open prices sorted by timestamp, take first (oldest) -> market open price
-        fetch highest price seen that day
-        fetch lowest price seen that day
-        fetch closing price (first point when ordered by timestamp descending, opposite order to open_price)
-    group ticker date and order by ascending timestamp
+    Fetches historical market data for the portfolio's tickers within the date range.
     """
     logger = portfolio.logger
+    tickers = getattr(portfolio, "tickers", [])
+
+    if not tickers:
+        logger.warning(
+            "No tickers specified in the portfolio; returning empty DataFrame."
+        )
+        return pd.DataFrame()
+
     placeholders = ", ".join(["%s"] * len(tickers))
     sql = f"""
-        SELECT
-            ticker,
-            (ARRAY_AGG(timestamp   ORDER BY timestamp DESC))[1] AS timestamp,
-            (ARRAY_AGG(open_price  ORDER BY timestamp ASC ))[1] AS open_price,
-            MAX(high_price)                                      AS high_price,
-            MIN(low_price)                                       AS low_price,
-            (ARRAY_AGG(close_price ORDER BY timestamp DESC))[1] AS close_price,
-            SUM(volume)                                          AS volume
+        SELECT *
           FROM market_data
          WHERE ticker IN ({placeholders})
            AND timestamp BETWEEN %s AND %s
-           AND (timestamp AT TIME ZONE 'America/New_York')::time
-               BETWEEN '09:30' AND '16:00'
-         GROUP BY ticker, DATE(timestamp AT TIME ZONE 'America/New_York')
          ORDER BY timestamp ASC
     """
     params = tickers + [start, end]
     logger.debug("DB query for %d tickers from %s to %s", len(tickers), start, end)
 
     try:
-        # Execute db query
         result = portfolio.db.execute_query(sql, params, fetch=True)
     except Exception as e:
-        # return empty df if failed to query
-        logger.exception("Database query exception: %s", e, exc_info=True)
+        logger.exception(f"Database query exception: {e}", exc_info=True)
         return pd.DataFrame()
 
     if result.get("status") != "success":
-        # Return empty df if query successful but didn't retrieve data
-        logger.error("Database query failed: %s", result.get("message", "<no message>"))
+        msg = result.get("message", "<no message>")
+        logger.error(f"Database query failed: {msg}")
         return pd.DataFrame()
 
-    raw = result.get("data", [])
-    if not raw:
-        # return empty df if no data found for tickers
-        logger.warning("DB query returned no rows for tickers %s.", tickers)
+    raw_data = result.get("data", [])
+    if not raw_data:
+        logger.warning("Historical data query returned no rows.")
         return pd.DataFrame()
 
-    # Create df using fetched data
-    df = pd.DataFrame(raw)
+    df = pd.DataFrame(raw_data)
 
     # Add timestamp column to df in NY timezone
     df["timestamp"] = pd.to_datetime(
         df["timestamp"], utc=True, errors="coerce"
     ).dt.tz_convert("America/New_York")
 
-    # Ensure prices are numeric (not str)
-    for col in ["open_price", "high_price", "low_price", "close_price", "volume"]:
+    # Step 3: Convert all numeric columns.
+    numeric_cols = ["open_price", "high_price", "low_price", "close_price", "volume"]
+    for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Drop invalid rows (missing required data, e.g., open price but no close price, no timestamp, etc)
-    before = len(df)
+    # --- End of Corrected Logic ---
+
+    # Step 4: Drop any rows that failed coercion in the steps above.
+    before_drop = len(df)
     df.dropna(subset=["timestamp", "ticker", "close_price"], inplace=True)
     dropped = before - len(df)
     if dropped:
@@ -109,10 +96,10 @@ def fetch_historical_data(
         )
         return pd.DataFrame()
 
-    # Initialize start and end dates as timezone-aware (UTC) to avoid tz-naive/tz-aware comparisons
-    start = pd.to_datetime(start_date, utc=True)
-    # Ensure end date includes the entire end day, up until close (timezone-aware)
-    end = pd.to_datetime(end_date, utc=True) + pd.Timedelta(hours=23, minutes=59, seconds=59)
+    # Initialize start and end dates
+    start = pd.Timestamp(start_date)
+    # Ensure end date includes the entire end day, up until close
+    end = pd.Timestamp(end_date) + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
     # Load any available ticker data from local cache
     caches = {t: _cache.load(t) for t in tickers}
