@@ -12,7 +12,6 @@ from datetime import date, datetime
 from typing import List, Optional, Union
 
 import pandas as pd
-
 from src.orchestrator.marketData.fmpMarketData import FMPMarketData
 
 logger = logging.getLogger(__name__)

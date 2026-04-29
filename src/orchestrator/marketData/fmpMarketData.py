@@ -81,17 +81,23 @@ class FMPMarketData:
             with self._lock:
                 current_time = time.time()
 
-                # Remove timestamps older than the rate limit window (60 seconds)
-                self.request_timestamps = [
-                    t
-                    for t in self.request_timestamps
-                    if (current_time - t) < self.LOCK_WINDOW_SECONDS
-                ]
+            # Remove timestamps older than the rate limit window (60 seconds)
+            self.request_timestamps = [
+                t
+                for t in self.request_timestamps
+                if (current_time - t) < self.LOCK_WINDOW_SECONDS
+            ]
 
-                # If under the limit, reserve a slot and proceed
-                if len(self.request_timestamps) < self.MAX_REQUESTS_PER_MIN:
-                    self.request_timestamps.append(current_time)
-                    return
+            # If we are at or above the limit, wait
+            if len(self.request_timestamps) >= self.MAX_REQUESTS_PER_MIN:
+                wait_time = self.LOCK_WINDOW_SECONDS - (
+                    current_time - self.request_timestamps[0]
+                )
+                if wait_time > 0:
+                    print(
+                        f"[RateLimiter] Hit API limit ({self.MAX_REQUESTS_PER_MIN} calls/min). Sleeping for {wait_time:.2f} s..."
+                    )
+                    time.sleep(wait_time)
 
                 # Otherwise compute wait time until the oldest timestamp expires
                 wait_time = self.LOCK_WINDOW_SECONDS - (

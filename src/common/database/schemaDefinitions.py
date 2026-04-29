@@ -3,7 +3,7 @@ import logging
 try:
     from common.database.MQSDBConnector import (
         MQSDBConnector,
-    )  # ty:ignore[unresolved-import]
+    )
 except ImportError:
     logging.warning("MQSDBConnector relative import failed; using absolute import.")
     from src.common.database.MQSDBConnector import MQSDBConnector
