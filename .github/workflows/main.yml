@@ -227,8 +227,11 @@ jobs:
 
       - name: Require deployment webhook configuration
         # Enforce real CD: fail when deployment target is not configured.
-        if: steps.dockerfile.outputs.exists == 'true' && github.event_name == 'push' && secrets.DEPLOY_WEBHOOK_URL == ''
+        if: steps.dockerfile.outputs.exists == 'true' && github.event_name == 'push'
+        env:
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
         run: |
+          if [ -z "$DEPLOY_WEBHOOK_URL" ]; then
           echo "DEPLOY_WEBHOOK_URL is not configured. CD requires a deployment target." >&2
           exit 1
 
