@@ -1,88 +1,14 @@
 from collections import defaultdict
 from datetime import datetime
-from typing import List
 
 import pandas as pd
 
-from src.backtest.data.backfill_cache import cache as _cache
 from src.portfolios.portfolio_BASE.strategy import BasePortfolio
 
-
-def _fetch_from_db(portfolio, tickers: List[str], start, end) -> pd.DataFrame:
-    """
-    Fetches market data for the specified ticker(s) within the specified date range.
-
-    sql logic:
-    SELECT for specified tickers:
-        timestamps for all tickers, sorted by newest, take newest for each, gives last timestamp of the day
-        all open prices sorted by timestamp, take first (oldest) -> market open price
-        fetch highest price seen that day
-        fetch lowest price seen that day
-        fetch closing price (first point when ordered by timestamp descending, opposite order to open_price)
-    group ticker date and order by ascending timestamp
-    """
-    logger = portfolio.logger
-    placeholders = ", ".join(["%s"] * len(tickers))
-    sql = f"""
-        SELECT
-            ticker,
-            (ARRAY_AGG(timestamp   ORDER BY timestamp DESC))[1] AS timestamp,
-            (ARRAY_AGG(open_price  ORDER BY timestamp ASC ))[1] AS open_price,
-            MAX(high_price)                                      AS high_price,
-            MIN(low_price)                                       AS low_price,
-            (ARRAY_AGG(close_price ORDER BY timestamp DESC))[1] AS close_price,
-            SUM(volume)                                          AS volume
-          FROM market_data
-         WHERE ticker IN ({placeholders})
-           AND timestamp BETWEEN %s AND %s
-           AND (timestamp AT TIME ZONE 'America/New_York')::time
-               BETWEEN '09:30' AND '16:00'
-         GROUP BY ticker, DATE(timestamp AT TIME ZONE 'America/New_York')
-         ORDER BY timestamp ASC
-    """
-    params = tickers + [start, end]
-    logger.debug("DB query for %d tickers from %s to %s", len(tickers), start, end)
-
-    try:
-        # Execute db query
-        result = portfolio.db.execute_query(sql, params, fetch=True)
-    except Exception as e:
-        # return empty df if failed to query
-        logger.exception("Database query exception: %s", e, exc_info=True)
-        return pd.DataFrame()
-
-    if result.get("status") != "success":
-        # Return empty df if query successful but didn't retrieve data
-        logger.error("Database query failed: %s", result.get("message", "<no message>"))
-        return pd.DataFrame()
-
-    raw = result.get("data", [])
-    if not raw:
-        # return empty df if no data found for tickers
-        logger.warning("DB query returned no rows for tickers %s.", tickers)
-        return pd.DataFrame()
-
-    # Create df using fetched data
-    df = pd.DataFrame(raw)
-
-    # Add timestamp column to df in NY timezone
-    df["timestamp"] = pd.to_datetime(
-        df["timestamp"], utc=True, errors="coerce"
-    ).dt.tz_convert("America/New_York")
-
-    # Ensure prices are numeric (not str)
-    for col in ["open_price", "high_price", "low_price", "close_price", "volume"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # Drop invalid rows (missing required data, e.g., open price but no close price, no timestamp, etc)
-    before = len(df)
-    df.dropna(subset=["timestamp", "ticker", "close_price"], inplace=True)
-    dropped = before - len(df)
-    if dropped:
-        logger.warning("Dropped %d rows with invalid values after DB fetch.", dropped)
-
-    return df
+from .data.backfill_cache import cache as _cache
+from .data.backfill_cache.cache import load as _fetch_from_db
+from .data.backfill_cache.cache import missing_ranges as _missing_ranges
+from .data.backfill_cache.cache import save as _save_to_cache
 
 
 def fetch_historical_data(
