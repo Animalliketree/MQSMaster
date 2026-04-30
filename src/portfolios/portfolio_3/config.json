@@ -1,7 +1,7 @@
 {
   "PORTFOLIO_ID": "3",
   "TICKERS": ["AAPL", "TSLA", "AMZN", "MSFT", "NVDA", "JPM", "XOM", "UNH", "CAT", "WMT", "TLT", "GLD", "^VIX"],
-  "INTERVAL": 5850,
+  "INTERVAL": 60,
   "LOOKBACK_DAYS": 90,
   "EXCH": "NASDAQ",
   "WEIGHTS": {

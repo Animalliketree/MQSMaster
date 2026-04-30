@@ -348,9 +348,11 @@ def main(num_batches: Optional[int] = None):
                 try:
                     trade_log = future.result()
                     logging.info("Backtest completed successfully.")
-                    if trade_log is None or len(trade_log) == 0:
+                    if len(trade_log) == 0:
                         logging.info("No trades executed in this batch.")
                         continue
+                    elif trade_log is None:
+                        raise ValueError("Backtest returned None instead of a trade log.")
                     for portfolio in range(len(trade_log)):
                         for trade in trade_log[portfolio]:
                             print(f"{trade}")
