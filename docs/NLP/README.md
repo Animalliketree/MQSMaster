@@ -1,165 +1,197 @@
-# NLP Sentiment Analysis Pipeline
+# NLP Sentiment Pipeline
 
-This directory contains the NLP sentiment analysis pipeline that scrapes financial news articles, processes them for sentiment using FinBERT, and stores the results in the database.
+This guide documents the NLP article scraping and sentiment pipeline in detail. The matching quick command reference lives in [NLP/README.md](../../NLP/README.md).
 
-## System Overview
+## Overview
 
-The system now runs every **5 minutes** with the following improvements:
+The NLP system has three main entrypoints:
 
-### 1. Batched Processing
-- **Batch 1**: AAPL, MSFT, GOOGL
-- **Batch 2**: AMZN, TSLA  
-- **Batch 3**: NVDA, AMD
-- **2-minute intervals** between batches to avoid rate limiting
+- `NLP/daemon.py` for continuous batched scraping and processing
+- `NLP/fetch_articles.py` for one-off article fetches
+- `NLP/process_sentiment_pipeline.py` for sentiment scoring and database writes
 
-**Example:**
+A separate synthetic health-check path lives in `NLP/monitor_daemon.py`.
+
+## Runtime Model
+
+The daemon runs continuously with a repeating cycle:
+
+- Main scrape interval: 5 minutes
+- Delay between batches: 2 minutes
+- Batches are generated dynamically from portfolio config files
+- Unsupported tickers are filtered before batching
+- Recent activity is tracked to skip repeated sentiment processing when there are no new articles
+
+## Key Commands
+
+### Start the daemon
+
+```bash
+python NLP/daemon.py start
+```
+
+### Fetch articles manually
+
+```bash
 python -m NLP.fetch_articles AAPL 2025-12-01 2025-12-31
-### 2. Integrated Pipeline
-Each ticker goes through:
-1. **Article Fetching**: `fetch_articles.py` scrapes from multiple sources and merges into single CSV
-2. **Sentiment Processing**: FinBERT model computes sentiment scores
-3. **Database Storage**: Results stored in `news_sentiment` table
+```
 
-### 3. Consolidated Data Storage
-- **Single CSV per ticker**: All sources (FMP, Yahoo, Finviz, Alpha Vantage) merged into `TICKER.csv`
-- **No separate files**: Eliminates multiple CSV files per ticker
-- **Automatic deduplication**: Removes duplicate articles across sources
+### Run sentiment processing
 
-### 4. Database Integration
-- Sentiment scores automatically stored in PostgreSQL
-- Real-time access for trading strategies
-- Duplicate prevention and data validation
+```bash
+python -m NLP.process_sentiment_pipeline AAPL MSFT
+```
+
+### Test the pipeline
+
+```bash
+python -m NLP.test_pipeline
+```
+
+### Query the database
+
+```bash
+python -m NLP.update_database --query AAPL MSFT
+```
+
+### Run synthetic monitoring
+
+```bash
+python NLP/monitor_daemon.py --synthetic --max-log-age-hours 72
+```
 
 ## Key Files
 
-### Core Pipeline
-- `scraper_daemon.sh` - Main daemon script (runs every 5 minutes)
-- `fetch_articles.py` - Article scraping from multiple sources, merged into single CSV per ticker
-- `sentiment_processor.py` - FinBERT sentiment analysis
-- `update_database.py` - Database integration
-- `process_sentiment_pipeline.py` - Integrated pipeline orchestrator
+### Core pipeline
 
-### Utilities
-- `cleanup_csv_files.py` - Merge existing separate CSV files into single files per ticker
-- `test_pipeline.py` - End-to-end pipeline testing
+- `daemon.py` - portfolio-driven scraper and sentiment daemon
+- `fetch_articles.py` - article scraping and per-ticker CSV generation
+- `process_sentiment_pipeline.py` - sentiment scoring and persistence
+- `sentiment_processor.py` - FinBERT sentiment scoring helpers
+- `update_database.py` - database integration and query helpers
 
-## Usage
+### Monitoring and utilities
 
-### Start the Daemon
-```bash
-# Start the scraper daemon
-./scraper_daemon.sh start
+- `monitor_daemon.py` - synthetic checks for external health
+- `test_pipeline.py` - end-to-end pipeline validation
+- `fetch_alt_articles.py` - alternate article fetch path
+- `news_scraper.py` - scraper helpers for individual sources
 
-# Monitor with auto-restart
-./scraper_daemon.sh monitor
+## Data Layout
 
-# Check status
-./scraper_daemon.sh status
+### Articles
 
-# Stop the daemon
-./scraper_daemon.sh stop
-```
+Stored under `NLP/articles/` as per-ticker CSVs.
 
-### Manual Processing
-```bash
-# Process specific tickers
-python -m NLP.process_sentiment_pipeline AAPL MSFT
+Examples:
 
-# Test the pipeline
-python -m NLP.test_pipeline
+- `AAPL.csv`
+- `MSFT.csv`
+- `GOOGL.csv`
 
-# Query database
-python -m NLP.update_database --query AAPL MSFT
+### Sentiment scores
 
-# Cleanup existing separate CSV files (merge into single files)
-python -m NLP.cleanup_csv_files
+Stored under `NLP/sentiment_scores/` as per-ticker outputs.
 
-# Cleanup specific tickers only
-python -m NLP.cleanup_csv_files --tickers AAPL MSFT
+Examples:
 
-# Force remove all separate files (if merging fails)
-python -m NLP.cleanup_csv_files --force
+- `AAPL_article_scores.csv`
+- `AAPL_daily_scores.csv`
+
+### Model assets
+
+The FinBERT model lives in `NLP/finbert-combined-final/`.
+
+## Portfolio-Driven Batching
+
+The daemon loads tickers from portfolio config files under `src/portfolios/` and splits them into roughly equal batches.
+
+Behavior:
+
+- Reads tickers from portfolio configs in order
+- Deduplicates tickers while preserving first-seen order
+- Excludes tickers in the configured skip set, such as `^VIX`
+- Builds up to four batches from the resulting list
+- Processes each batch with a pause between batches
+
+This means batch contents are data-driven and may change when portfolio configs change.
+
+## Processing Flow
+
+```text
+Article scraping
+      ↓
+Per-ticker CSV merge
+      ↓
+Sentiment scoring with FinBERT
+      ↓
+Database update
+      ↓
+Trading strategy access
 ```
 
 ## Database Schema
 
 The `news_sentiment` table stores:
-- `ticker` - Stock symbol
-- `article_url` - Unique article identifier
-- `published_at` - Article publication timestamp
-- `sentiment_score` - FinBERT score (-1.0 to 1.0)
-- `content_summary` - Article summary (first 500 chars)
 
-## System Flow
+- `ticker` - stock symbol
+- `article_url` - unique article identifier
+- `published_at` - article publication timestamp
+- `sentiment_score` - FinBERT score in the range `[-1.0, 1.0]`
+- `content_summary` - article summary or excerpt
 
-```
-Article Scraping (fetch_articles.py)
-         ↓
-   Merge All Sources into Single CSV per Ticker
-         ↓
-Sentiment Analysis (sentiment_processor.py)
-         ↓
-Database Storage (update_database.py)
-         ↓
-Trading Strategy Access
-```
+## Monitoring and Logs
 
-## File Structure
+The daemon writes logs to `NLP/daemon.log` and reports:
 
-### Articles Directory (`NLP/articles/`)
-- `AAPL.csv` - All Apple articles from all sources
-- `MSFT.csv` - All Microsoft articles from all sources  
-- `GOOGL.csv` - All Google articles from all sources
-- etc.
+- batch startup and completion
+- fetch status per ticker
+- sentiment processing status
+- skip decisions for low-activity tickers
+- memory cleanup activity
+- errors and retries
 
-### Sentiment Scores Directory (`NLP/sentiment_scores/`)
-- `AAPL_article_scores.csv` - Per-article sentiment scores
-- `AAPL_daily_scores.csv` - Daily averaged sentiment scores
-- etc.
+## Configuration Notes
 
-## Timing Configuration
+### Timing
 
-- **Main Loop**: Every 5 minutes
-- **Batch 1**: AAPL, MSFT, GOOGL (starts immediately)
-- **Batch 2**: AMZN, TSLA (starts after 2 minutes)
-- **Batch 3**: NVDA, AMD (starts after 4 minutes)
-- **Next Cycle**: Starts at 5-minute mark
+- Scrape cycle interval: 300 seconds
+- Delay between batches: 120 seconds
+- Memory cleanup interval: every 10 cycles
+- Log rotation size: 10 MB
 
-## Monitoring
+### Environment
 
-Logs are written to `scraper.log` with:
-- Article fetching status
-- Sentiment processing progress
-- Database update results
-- Error handling and retries
+Typical runtime requirements include:
 
-## Dependencies
+- Python dependencies from `requirements.txt`
+- portfolio config files under `src/portfolios/`
+- database connectivity for sentiment persistence
+- optional market-data and API credentials for source fetches
 
-- **FinBERT Model**: `finbert-combined-final/` directory
-- **Database**: PostgreSQL with `news_sentiment` table
-- **Python Libraries**: transformers, torch, pandas, tqdm
-- **System**: CUDA support recommended for faster processing
+## Legacy and Manual Workflows
 
----
+Use the one-off commands above when you want to run a single pipeline step. Use the daemon only when you want continuous scheduled batching.
 
-## Legacy Manual Usage
+## Troubleshooting
 
-### Fetching Articles Manually
+### No tickers loaded
 
-```bash
-python -m NLP.fetch_articles AAPL 2025-12-01 2025-12-31
-```
+Check the portfolio config files under `src/portfolios/` and confirm they contain `TICKERS` entries.
 
-### Adding Models
+### No new articles found
 
-1. Download the required model `.zip` file from [this link](https://drive.google.com/drive/u/4/folders/1v7NjSuyFq4CTIctrw1bSv13JzkkMg1l8).
-2. Extract the contents into the `NLP/models` folder.
+This is usually expected when the source has already been processed recently or no fresh articles exist for the selected date range.
 
-> Contact one of the DataInfra Members if you are unable to access the link.
+### Sentiment step skipped
 
-### Manual Notebook Execution
+The daemon skips sentiment work when recent cycles show no new articles for a ticker.
 
-1. Open `visualise_NLP.ipynb` in a Jupyter Notebook environment.
-2. Run each cell in order to process the data and visualize the results.
+### Monitoring failures
 
-> **Note**: The automated pipeline now handles sentiment processing. The notebook is primarily for visualization and analysis.
+Use `NLP/monitor_daemon.py` for synthetic checks instead of treating external service probing as part of the normal pytest suite.
+
+## Related Docs
+
+- [Quick NLP commands](../../NLP/README.md)
+- [Test modes](../TEST_MODES.md)

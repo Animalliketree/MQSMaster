@@ -32,7 +32,7 @@ LOG_FILE = SCRIPT_DIR / "daemon.log"
 # Portfolio config paths (P1 -> P2 -> P3, later portfolios can add tickers)
 NUM_PORTFOLIOS = 4
 PORTFOLIO_CONFIGS = []
-for n in range(0, NUM_PORTFOLIOS):
+for n in range(1, NUM_PORTFOLIOS):
     PORTFOLIO_CONFIGS.append(f"{PROJECT_ROOT}/src/portfolios/portfolio_{n}/config.json")
 
 # Tickers to exclude (e.g. indices that have no news)
