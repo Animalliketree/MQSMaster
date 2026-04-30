@@ -7,7 +7,7 @@
         "NVDA": 0.25,
         "MSFT": 0.25
     },
-    "INTERVAL": 23400,
+    "INTERVAL": 3600,
     "LOOKBACK_DAYS": 50,
      "DATA_FEEDS": ["MARKET_DATA", "POSITIONS", "CASH_EQUITY", "PORT_NOTIONAL"]
 }
