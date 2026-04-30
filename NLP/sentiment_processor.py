@@ -155,9 +155,11 @@ class SentimentProcessor:
             logger.info(f"No new articles to score for {ticker}")
             # Still need to return existing scores for daily aggregation
             if not existing_scores_df.empty:
-                daily_scores_df = existing_scores_df.groupby(
-                    existing_scores_df["date"].dt.date, as_index=False
-                )["sentiment"].mean()
+                # Add a date column to the DataFrame
+                existing_scores_df["date_only"] = existing_scores_df["date"].dt.date
+
+                # Now group by the column
+                daily_scores_df = existing_scores_df.groupby("date_only", as_index=False)["sentiment"].mean()
                 return existing_scores_df, daily_scores_df
             return pd.DataFrame(), pd.DataFrame()
 
@@ -323,8 +325,8 @@ class SentimentProcessor:
             logger.error(f"Failed to read daily scores for {ticker}: {e}")
             return None
 
-        start = pd.Timestamp(start_date).normalize()
-        end = pd.Timestamp(end_date).normalize()
+        start = pd.to_datetime(start_date, utc=True).normalize()
+        end = pd.to_datetime(end_date, utc=True).normalize()
 
         mask = (df["date"] >= start) & (df["date"] <= end)
         window = df.loc[mask, "sentiment"]
