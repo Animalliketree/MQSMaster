@@ -43,5 +43,8 @@ jobs:
             -d "{\"repository\":\"${{ github.repository }}\",\"sha\":\"${{ github.sha }}\",\"image\":\"$IMAGE\",\"environment\":\"$TARGET_ENV\"}"
 
       - name: Deployment trigger sent
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}
+          TARGET_ENV: ${{ inputs.environment }}
         run: |
           echo "Triggered deployment for $IMAGE to $TARGET_ENV"

@@ -207,9 +207,13 @@ class BacktestExecutor:
         """
         trade_logs: list[str] = []
         for entry in self.trade_log:
+            ts = entry["timestamp"]
+            ts_str = (
+                ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, "strftime") else str(ts)
+            )
             msg = (
                 f"[{entry.get('portfolio_id', 'unknown')}] "
-                f"{entry['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} - "
+                f"{ts_str} - "
                 f"{entry['ticker']} | {entry['signal_type']} "
                 f"{entry['shares']} @ {entry['fill_price']:.2f}$ "
                 f"cash={entry['cash_after']:.2f}$"
