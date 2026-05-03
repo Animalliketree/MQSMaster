@@ -201,24 +201,22 @@ class BacktestExecutor:
             "updated_cash": self.cash,
         }
 
-    def dump_trade_log(self):
+    def dump_trade_log(self) -> list[str]:
         """
-        Emit all recorded trades to the executor's logger.
-
-        This method should typically be called once after a backtest run has
-        completed, so that detailed trade output does not interfere with
-        progress bars (for example, those produced by ``tqdm``) or other
-        console output written during execution.
-
-        The method returns nothing; it iterates over ``self.trade_log`` and
-        logs a formatted message for each recorded trade.
+        Generate formatted trade log entries and return them as a list of strings.
         """
+        trade_logs: list[str] = []
         for entry in self.trade_log:
-            self.logger.info(
-                "Executed %s: %s| %s @ %.2f$ Cash after trade: %.2f$",
-                entry["ticker"],
-                entry["signal_type"],
-                entry["shares"],
-                entry["fill_price"],
-                entry["cash_after"],
+            ts = entry["timestamp"]
+            ts_str = (
+                ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, "strftime") else str(ts)
             )
+            msg = (
+                f"[{entry.get('portfolio_id', 'unknown')}] "
+                f"{ts_str} - "
+                f"{entry['ticker']} | {entry['signal_type']} "
+                f"{entry['shares']} @ {entry['fill_price']:.2f}$ "
+                f"cash={entry['cash_after']:.2f}$"
+            )
+            trade_logs.append(msg)
+        return trade_logs

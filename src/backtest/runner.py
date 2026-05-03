@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 from zoneinfo import ZoneInfo  # <-- ADDED for timezone fix
@@ -176,12 +177,23 @@ class BacktestRunner:
         # --- END FIX 2 ---
 
         # Wrap the *filtered* timestamps with tqdm
+        progress_position_raw = os.environ.get("TQDM_POSITION", "0")
+        try:
+            progress_position = int(progress_position_raw)
+        except ValueError:
+            self.logger.warning(
+                "Invalid TQDM_POSITION=%r; falling back to 0", progress_position_raw
+            )
+            progress_position = 0
+        progress_desc = os.environ.get("TQDM_DESC", "Running Backtest")
         progress_bar = tqdm(
             loop_timestamps,
             total=len(loop_timestamps),
-            desc="Running Backtest",
+            desc=progress_desc,
             unit=" steps",
             leave=True,
+            position=progress_position,
+            dynamic_ncols=True,
         )
 
         for current_timestamp in progress_bar:  # <-- Iterate over filtered timestamps
@@ -239,7 +251,6 @@ class BacktestRunner:
             self.perf_records.append(record)
 
         self.logger.info("Event loop finished.")
-        self.executor.dump_trade_log()
 
     def _calculate_results(self) -> Optional[pd.DataFrame]:
         """Calculates performance metrics from recorded data."""
@@ -289,7 +300,7 @@ class BacktestRunner:
             elif getattr(self.portfolio, "executor", None) is None:
                 self.logger.info("Portfolio executor was None or already restored.")
 
-    def run(self) -> None:
+    def run(self) -> Optional[List[str]]:
         """Executes the entire backtest process."""
         self.logger.info("===== Starting Backtest Run =====")
         if not hasattr(self.portfolio, "portfolio_id") or not hasattr(
@@ -321,11 +332,15 @@ class BacktestRunner:
                     initial_capital=self.total_start_capital,
                     full_historical_data=self.main_data_df,
                 )
+                if self.executor:
+                    trade_log = self.executor.dump_trade_log()
+                else:
+                    trade_log = None
+                return trade_log
             else:
                 self.logger.warning(
                     "Skipping report generation due to empty or invalid results."
                 )
-
         except Exception as e:
             self.logger.exception(
                 f"An critical error occurred during the backtest run: {e}",

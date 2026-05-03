@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
-
 # Find the absolute path of the directory where the script is located.
 # This ensures that the script can be run from anywhere, including cron.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,15 +8,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- !! ACTION REQUIRED !! ---
 # Define the absolute path to the Python executable in your virtual environment.
 # Based on your 'ls' command, this should be the correct path.
-PYTHON_VENV="/home/master/MQSMaster/MQS/bin/python"
+PYTHON_VENV="/app/MQSMaster/MQS/bin/python" #docker deployment path
 
 # Load environment variables (like FMP_API_KEY) from the .env file.
 # The .env file should be in the same directory as this script.
 if [ -f "${SCRIPT_DIR}/.env" ]; then
     source "${SCRIPT_DIR}/.env"
 else
-    echo "[ERROR] .env file not found at ${SCRIPT_DIR}/.env. Exiting."
-    exit 1
+    echo "[ERROR] .env file not found at ${SCRIPT_DIR}/.env. trying .env.example."
+    if [ -f "${SCRIPT_DIR}/.env.example" ]; then
+        cp "${SCRIPT_DIR}/.env.example" "${SCRIPT_DIR}/.env"
+        echo "[WARNING] Created .env from .env.example. Please verify credentials are correct."
+        source "${SCRIPT_DIR}/.env"
+    else
+        echo "[ERROR] .env.example file not found at ${SCRIPT_DIR}/.env.example. Exiting."
+        exit 1
+    fi
 fi
 
 # Set the exchange to monitor.
@@ -70,9 +76,11 @@ cd "$SCRIPT_DIR" || exit
 # Array to hold the Process IDs (PIDs) of the background scripts.
 pids=()
 scripts_to_run=(
-  "./main.py"
-  "data_infra/orchestrator/realTime/realtimeDataIngestor.py"
-  "./pnl_script.py"
+  "./src/main.py"
+  "./src/orchestrator/realTime/realtimeDataIngestor.py"
+  "./src/orchestrator/realTime/pnl_script.py"
+  "./NLP/daemon.py"
+  "./src/orchestrator/backfill/update/refresh.py"
 )
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting background processes using Python from: ${PYTHON_VENV}"

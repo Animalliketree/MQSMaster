@@ -29,6 +29,7 @@ except ImportError as abs_err:
         )
         raise
 
+
 def _camel_to_snake(name: str) -> str:
     """Converts a CamelCase string to snake_case for dynamic module loading."""
     s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
@@ -88,6 +89,57 @@ class BasePortfolio(ABC):
         # --- Indicator Management ---
         self._indicators: List[Indicator] = []
 
+    def _build_indicator_update_payload(self, indicator: Indicator, row):
+        """Build a consistent Update() payload for an indicator from a market-data row."""
+        price_col = (
+            getattr(indicator, "price_col", None)
+            or getattr(indicator, "close_col", None)
+            or "close_price"
+        )
+
+        if not hasattr(row, price_col):
+            return None
+
+        price_value = getattr(row, price_col)
+        if pd.isna(price_value):
+            return None
+
+        update_kwargs = {}
+
+        vol_col = getattr(indicator, "vol_col", None)
+        if vol_col and hasattr(row, vol_col):
+            vol_value = getattr(row, vol_col)
+            if pd.notna(vol_value):
+                update_kwargs[vol_col] = float(vol_value)
+                # Keep a normalized alias for indicators that read `volume` directly.
+                update_kwargs["volume"] = float(vol_value)
+
+        for indicator_attr in ("high_col", "low_col", "close_col"):
+            col_name = getattr(indicator, indicator_attr, None)
+            if col_name and hasattr(row, col_name):
+                col_value = getattr(row, col_name)
+                if pd.notna(col_value):
+                    update_kwargs[col_name] = float(col_value)
+
+        return price_col, float(price_value), update_kwargs
+
+    def _update_indicator_from_row(self, indicator: Indicator, row) -> bool:
+        """Update one indicator from one row; returns True if an update was applied."""
+        payload = self._build_indicator_update_payload(indicator, row)
+        if payload is None:
+            return False
+
+        _, price_value, update_kwargs = payload
+        try:
+            if update_kwargs:
+                indicator.Update(row.timestamp, price_value, **update_kwargs)
+            else:
+                indicator.Update(row.timestamp, price_value)
+        except TypeError:
+            # Some indicators accept only (timestamp, data_point).
+            indicator.Update(row.timestamp, price_value)
+        return True
+
     # --- DYNAMIC INDICATOR FACTORY ---
     def AddIndicator(
         self, indicator_class_name: str, ticker: str, **kwargs
@@ -139,7 +191,7 @@ class BasePortfolio(ABC):
         params = [ticker, start_time.date(), end_time.date()]
         result = self.db.execute_query(sql, params, fetch="all")
 
-        price_col = kwargs.get("price_col", "close_price")
+        price_col = kwargs.get("price_col") or kwargs.get("close_col", "close_price")
         if result["status"] == "success" and result.get("data"):
             df = pd.DataFrame(result["data"])
 
@@ -148,12 +200,37 @@ class BasePortfolio(ABC):
             # 2. Convert back to 'America/New_York' to preserve the desired timezone info.
             df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
-            df[price_col] = pd.to_numeric(df[price_col], errors="coerce").dropna()
+            numeric_cols = {price_col}
+            for col_name in (
+                kwargs.get("vol_col"),
+                kwargs.get("high_col"),
+                kwargs.get("low_col"),
+                kwargs.get("close_col"),
+            ):
+                if col_name:
+                    numeric_cols.add(col_name)
+
+            for col_name in numeric_cols:
+                if col_name in df.columns:
+                    df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
+
+            dropna_cols = ["timestamp"]
+            if price_col not in df.columns:
+                self.logger.warning(
+                    "Indicator warmup missing price_col for _build_indicator_update_payload path "
+                    "(indicator=%s, ticker=%s, price_col=%s, df_columns=%s)",
+                    indicator_class_name,
+                    ticker,
+                    price_col,
+                    list(df.columns),
+                )
+            if price_col in df.columns:
+                dropna_cols.append(price_col)
+            df.dropna(subset=dropna_cols, inplace=True)
             df.sort_values("timestamp", inplace=True)
 
             for row in df.itertuples():
-                # The timestamp passed to Update() is now a proper, localized timestamp
-                indicator.Update(row.timestamp, getattr(row, price_col))
+                self._update_indicator_from_row(indicator, row)
 
         self._indicators.append(indicator)
         return indicator
@@ -213,46 +290,21 @@ class BasePortfolio(ABC):
 
             # Process each new bar in chronological order for each ticker
             if not new_data.empty:
-                for timestamp, group in new_data.sort_values("timestamp").groupby(
-                    "timestamp"
-                ):
+                for _, group in new_data.sort_values("timestamp").groupby("timestamp"):
                     for row in group.itertuples():
                         for indicator in self._indicators:
                             if indicator.ticker == row.ticker:
-                                # Get the OHLCV column names from indicator config
-                                price_col = getattr(
-                                    indicator, "price_col", "close_price"
+                                if not self._update_indicator_from_row(indicator, row):
+                                    continue
+
+                                price_col = (
+                                    getattr(indicator, "price_col", None)
+                                    or getattr(indicator, "close_col", None)
+                                    or "close_price"
                                 )
                                 vol_col = getattr(indicator, "vol_col", "volume")
                                 high_col = getattr(indicator, "high_col", "high_price")
                                 low_col = getattr(indicator, "low_col", "low_price")
-
-                                if hasattr(row, price_col) and pd.notna(
-                                    getattr(row, price_col)
-                                ):
-                                    indicator.Update(
-                                        row.timestamp, getattr(row, price_col)
-                                    )
-                                # Handle volume if applicable
-                                if hasattr(indicator, "vol_col") and pd.notna(
-                                    getattr(row, vol_col)
-                                ):
-                                    indicator.Update(
-                                        row.timestamp, getattr(row, vol_col)
-                                    )
-                                # Handle high/low if applicable
-                                if hasattr(indicator, "high_col") and pd.notna(
-                                    getattr(row, high_col)
-                                ):
-                                    indicator.Update(
-                                        row.timestamp, getattr(row, high_col)
-                                    )
-                                if hasattr(indicator, "low_col") and pd.notna(
-                                    getattr(row, low_col)
-                                ):
-                                    indicator.Update(
-                                        row.timestamp, getattr(row, low_col)
-                                    )
                                 self.logger.debug(
                                     f"Updated {indicator.__class__.__name__} for {row.ticker} at {row.timestamp}: {getattr(row, price_col)}, vol={getattr(row, vol_col, 'N/A')}, high={getattr(row, high_col, 'N/A')}, low={getattr(row, low_col, 'N/A')}"
                                 )
