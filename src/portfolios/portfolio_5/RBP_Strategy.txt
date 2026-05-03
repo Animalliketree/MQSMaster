@@ -1,0 +1,31 @@
+Relevance-Based Prediction (RBP) Strategy
+==========================================
+
+This strategy implements the RBP framework for stock return prediction.
+
+Core Concepts:
+- Uses Mahalanobis distance to measure similarity between current market
+  conditions and historical observations.
+- Computes relevance scores combining similarity and informativeness.
+- Searches a grid of variable subsets × censoring thresholds to produce
+  multiple calibrations.
+- Forms a composite prediction as a reliability-weighted average across
+  all grid cells.
+- Calculates RBI (Relevance-Based Importance) scores to assess which
+  variables are most informative for each prediction task.
+
+Features Used (X):
+  - past_return_21d:  1-month past return (momentum)
+  - past_vol_21d:     1-month past volatility
+  - past_return_63d:  3-month past return
+  - past_vol_63d:     3-month past volatility
+  - past_return_252d: 1-year past return
+
+Target (Y):
+  - target_return_21d: 1-month forward return
+
+Signal Logic:
+  - BUY when composite prediction > buy_threshold (default 0.5%)
+  - SELL when composite prediction < sell_threshold (default -0.5%)
+    and a position is held
+  - Risk-off mode when cash < 10% of portfolio value

@@ -1,0 +1,27 @@
+{
+  "PORTFOLIO_ID": "5",
+  "TICKERS": ["AAPL", "MSFT", "GOOG"],
+  "INTERVAL": 23400,
+  "LOOKBACK_DAYS": 3650,
+  "EXCH": "NASDAQ",
+  "WEIGHTS": {
+    "AAPL": 0.333,
+    "MSFT": 0.333,
+    "GOOG": 0.334
+  },
+  "DATA_FEEDS": ["MARKET_DATA", "POSITIONS", "CASH_EQUITY", "PORT_NOTIONAL"],
+  "RBP_CONFIG": {
+    "SPLIT_DATE": "2020-01-01",
+    "FEATURE_COLS": [
+      "past_return_21d",
+      "past_vol_21d",
+      "past_return_63d",
+      "past_vol_63d",
+      "past_return_252d"
+    ],
+    "TARGET_COL": "target_return_21d",
+    "RELEVANCE_THRESHOLDS": [0.0, 0.2, 0.5, 0.8],
+    "BUY_THRESHOLD": 0.005,
+    "SELL_THRESHOLD": -0.005
+  }
+}

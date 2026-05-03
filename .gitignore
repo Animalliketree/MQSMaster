@@ -13,6 +13,7 @@ visualise_gpt2.ipynb
 *.pyc
 *.egg-info/
 venv/
+mqs/
 .env
 *.lock
 .vscode/
