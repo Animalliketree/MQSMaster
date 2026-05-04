@@ -57,9 +57,9 @@ You will know the environment is active when you see (MQS) at the beginning of y
 The bot requires API keys and database credentials. We manage these using a .env file.
 Ask the exec for the Data & Infra team for this file.
 
-Copy the `.env.example` file to `.env` in the root directory, then update it with your credentials:
+Copy the `.env.example` file or rename to `.env` in the root directory, then update it with your credentials:
 
-    1. `cp .env.example .env`
+    1. `cp .env.example .env`(or just rename the file)
     2. Open the `.env` file and fill in the required values (API keys, database credentials, etc.).
 #### Step 4: Install Project and Dependencies
 

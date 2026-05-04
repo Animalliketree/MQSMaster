@@ -116,8 +116,11 @@ class MarketData:
         self._cache = {}
 
         if market_data_df is not None and not market_data_df.empty:
-            # PERFORMANCE OPTIMIZATION: Set timestamp as index and group by ticker ONCE.
-            df = market_data_df.set_index('timestamp')
+            df = market_data_df.copy()
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+            df["ticker"] = df["ticker"].astype("string")
+            df = df.dropna(subset=["timestamp", "ticker"]).infer_objects(copy=False)
+            df = df.set_index('timestamp')
             self._grouped_data = dict(list(df.groupby('ticker')))
             self._unique_tickers = set(self._grouped_data.keys())
         else:

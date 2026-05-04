@@ -17,8 +17,8 @@ mqs/
 .env
 *.lock
 .vscode/
-src/backtest/data
-
+src/backtest/data/*
+src/backtest/data/**/*
 # Jupyter Notebook outputs (keeps diffs clean)
 *.ipynb
 **/.ipynb
