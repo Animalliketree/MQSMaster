@@ -81,3 +81,18 @@ If you see something like the following lines, congratulations, you have success
 
 2025-09-20 16:54:37,793 INFO: Database connection pool created successfully.
 ✅ PostgreSQL connection successful! Current DB Time: 2025-09-20 15:24:37.975847-04:00
+
+#### Step 6: Download the FinBERT Model (required for the NLP pipeline)
+
+The fine-tuned FinBERT model is **not** in the repo. If you plan to run any of the NLP / sentiment code (`NLP/daemon.py`, `NLP/process_sentiment_pipeline.py`, etc.), download the model folder and drop it into `NLP/`:
+
+1. Download from: <https://drive.google.com/drive/folders/1v7NjSuyFq4CTIctrw1bSv13JzkkMg1l8?usp=sharing>
+2. Place the folder so the final path is:
+
+   ```
+   NLP/finbert-combined-final/
+   ```
+
+3. Confirm it contains the model weights, tokenizer, and `config.json`.
+
+See [NLP/README.md](../NLP/README.md) and [docs/NLP/README.md](../docs/NLP/README.md) for details.
