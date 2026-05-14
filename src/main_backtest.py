@@ -51,11 +51,7 @@ BACKTEST_MODE = ""  # or "fast"
 BACKTEST_NUM_BATCHES = None  # Set to an integer to override auto batch(for best results use the number of cores on your machine).
 DEFAULT_PORTFOLIO_CLASSES = [
     VolMomentum,
-    MomentumStrategy,
-    RegimeAdaptiveStrategy,
-    TrendRotateStrategy,
-    CrossoverRmiStrategy,
-    RBPStrategy,
+    MomentumStrategy
 ]
 
 AVAILABLE_PORTFOLIO_CLASSES = [
