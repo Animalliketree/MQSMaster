@@ -79,7 +79,7 @@ scripts_to_run=(
   "./src/main.py"
   "./src/orchestrator/realTime/realtimeDataIngestor.py"
   "./src/orchestrator/realTime/pnl_script.py"
-  "./NLP/daemon.py"
+  "./NLP/main_NLP.py"
   "./src/orchestrator/backfill/update/refresh.py"
 )
 
