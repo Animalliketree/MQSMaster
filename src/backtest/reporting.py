@@ -50,21 +50,59 @@ def _compute_sharpe_ratio(perf_df: pd.DataFrame) -> float:
     return float(sharpe_ratio)
 
 
+def _compute_annual_return(perf_df: pd.DataFrame) -> float:
+    """Calculates annualized return (CAGR) from a performance DataFrame."""
+    if perf_df.empty or "timestamp" not in perf_df or "portfolio_value" not in perf_df:
+        return 0.0
+
+    df = perf_df[["timestamp", "portfolio_value"]].copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df["portfolio_value"] = pd.to_numeric(df["portfolio_value"], errors="coerce")
+    df = df.dropna(subset=["timestamp", "portfolio_value"]).sort_values("timestamp")
+
+    if len(df) < 2:
+        return 0.0
+
+    start_value = float(df["portfolio_value"].iloc[0])
+    end_value = float(df["portfolio_value"].iloc[-1])
+
+    if not np.isfinite(start_value) or not np.isfinite(end_value) or start_value <= 0:
+        return 0.0
+
+    elapsed_days = (
+        df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]
+    ).total_seconds() / 86400.0
+    if elapsed_days <= 0:
+        return 0.0
+
+    annual_return = (end_value / start_value) ** (365.25 / elapsed_days) - 1.0
+    if not np.isfinite(annual_return):
+        return 0.0
+    return float(annual_return)
+
+
 def aggregate_final_metrics(perf_df: pd.DataFrame) -> pd.DataFrame:
     """Aggregates key metrics from perf_df."""
     if perf_df.empty or "portfolio_value" not in perf_df:
         return pd.DataFrame(columns=["metric", "value"])
     final_val = perf_df["portfolio_value"].iloc[-1]
     max_dd = _compute_max_drawdown(perf_df["portfolio_value"])
+    annual_return = _compute_annual_return(perf_df)
     sharpe = _compute_sharpe_ratio(perf_df)
     summary = pd.DataFrame(
         {
             "metric": [
                 "Final Portfolio Value",
                 "Max Drawdown (%)",
+                "Annual Return",
                 "Annualized Sharpe Ratio",
             ],
-            "value": [f"{final_val:,.2f}", f"{max_dd:.2%}", f"{sharpe:.3f}"],
+            "value": [
+                f"{final_val:,.2f}",
+                f"{max_dd:.2%}",
+                f"{annual_return:.2%}",
+                f"{sharpe:.3f}",
+            ],
         }
     )
     return summary
@@ -88,6 +126,8 @@ def _generate_minute_by_minute_performance(
     price_pivot = full_historical_data.pivot(
         index="timestamp", columns="ticker", values="close_price"
     )
+    price_pivot.index = pd.to_datetime(price_pivot.index, errors="coerce")
+    price_pivot = price_pivot[price_pivot.index.notna()].sort_index()
     minute_prices = price_pivot.resample("min").ffill().bfill()
 
     if not trade_log:
@@ -158,6 +198,8 @@ def _generate_buy_and_hold_benchmark(
     price_pivot = full_historical_data.pivot(
         index="timestamp", columns="ticker", values="close_price"
     )
+    price_pivot.index = pd.to_datetime(price_pivot.index, errors="coerce")
+    price_pivot = price_pivot[price_pivot.index.notna()].sort_index()
     minute_prices = price_pivot.resample("min").ffill().bfill()
 
     first_day_prices = minute_prices.iloc[0]
@@ -206,16 +248,22 @@ def _compute_rolling_stats(
     windows_days: List[int] = [30, 90, 180],
     date_col: str = "timestamp",
 ) -> Dict[str, pd.DataFrame]:
-    """Computes rolling statistics with a full window buffer."""
+    """
+    Computes rolling statistics allowing partial-window estimates
+    (min_periods = w // 2), so results begin once at least half of
+    the window has data.
+    """
     out: Dict[str, pd.DataFrame] = {}
     df = df_pct_returns.set_index(date_col)
     for w in windows_days:
         window_str = f"{w}D"
         rolling_mean = (
-            df[columns_to_analyze].rolling(window=window_str, min_periods=w).mean()
+            df[columns_to_analyze]
+            .rolling(window=window_str, min_periods=w // 2).mean()
         )
         rolling_vol = (
-            df[columns_to_analyze].rolling(window=window_str, min_periods=w).std()
+            df[columns_to_analyze]
+            .rolling(window=window_str, min_periods=w // 2).std()
         )
         wdf = pd.DataFrame(index=df.index)
         for col in columns_to_analyze:
@@ -263,12 +311,12 @@ def _compute_return_correlations(
     return df[columns_to_analyze].corr()
 
 
-# TODO --- Portfolio Risk Calculation Helpers (Unchanged) ---
+# --- Portfolio Risk Calculation Helpers (Unchanged) ---
 
 
 def _calculate_portfolio_risk_components(
     full_historical_data: pd.DataFrame, portfolio_weights: Dict[str, float]
-) -> (pd.DataFrame, pd.Series, pd.DataFrame):
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Calculates risk components, returning the correlation matrix,
     individual volatilities, and weights DataFrame separately.
@@ -353,6 +401,17 @@ def _calculate_rolling_portfolio_risk(
         }
     )
 
+def _build_csv(df: pd.DataFrame, filename: str, logger: logging.Logger, out_dir: str) -> None:
+    """Helper function to save a DataFrame to CSV with error handling."""
+    try:
+        if not df.empty:
+            path = os.path.join(out_dir, filename)
+            logger.info(f"saving {filename} to {path}")
+            df.to_csv(path, index=False)
+        else:
+            logger.warning(f"{filename} is empty; skipping CSV export")
+    except Exception as e:
+        logger.error(f"Error saving {filename}: {e}", exc_info=True)
 
 # --- Main Reporting Function (CORRECTED) ---
 def generate_backtest_report(
@@ -365,6 +424,7 @@ def generate_backtest_report(
     Generates and saves a full backtest report with enhanced risk analysis.
     """
     logger = portfolio.logger
+    reports = {}
     logger.info("Generating backtest report...")
     if perf_df.empty:
         logger.warning("Performance DataFrame is empty. Skipping report generation")
@@ -375,7 +435,6 @@ def generate_backtest_report(
     )
     os.makedirs(out_dir, exist_ok=True)
     logger.info(f"Report output directory: {out_dir}")
-
     # Section 1: Trade logs
     if isinstance(portfolio.executor, BacktestExecutor):
         try:
@@ -395,9 +454,7 @@ def generate_backtest_report(
                 ]
                 df_trades = df_trades[[c for c in cols if c in df_trades.columns]]
                 df_trades.sort_values("timestamp", inplace=True)
-                trade_log_path = os.path.join(out_dir, "trade_log.csv")
-                df_trades.to_csv(trade_log_path, index=False)
-                logger.info(f"Saved {len(df_trades)} trades to {trade_log_path}")
+                reports["trade_log"] = df_trades.copy()
             else:
                 logger.warning(
                     "Trade log is empty - no trades were executed during backtest"
@@ -406,13 +463,11 @@ def generate_backtest_report(
             logger.error(f"Error saving trade logs: {e}", exc_info=True)
 
     # Section 2: Raw Performance Timeseries
-    perf_df.to_csv(
-        os.path.join(out_dir, "performance_timeseries_absolute.csv"), index=False
-    )
+    reports["performance_timeseries_absolute"] = perf_df.copy()
 
     # Section 3: Final Summary Metrics
     metrics_df = aggregate_final_metrics(perf_df)
-    metrics_df.to_csv(os.path.join(out_dir, "summary_metrics.csv"), index=False)
+    reports["summary_metrics"] = metrics_df.copy()
 
     # Section 4: Percentage Returns DataFrame
     pct_df = pd.DataFrame()
@@ -421,9 +476,7 @@ def generate_backtest_report(
         pct_df["portfolio_pct_ret"] = (
             perf_df["portfolio_value"] / initial_capital
         ) - 1.0
-        pct_df.to_csv(
-            os.path.join(out_dir, "performance_timeseries_percentage.csv"), index=False
-        )
+        reports["performance_timeseries_percentage"] = pct_df.copy()
 
     # Section 5: High-frequency performance report
     try:
@@ -434,10 +487,7 @@ def generate_backtest_report(
             tickers=portfolio.tickers,
         )
         if not minute_perf_df.empty:
-            minute_perf_df.to_csv(
-                os.path.join(out_dir, "performance_timeseries_minute_by_minute.csv"),
-                index=False,
-            )
+            reports["performance_timeseries_minute_by_minute"] = minute_perf_df.copy()
     except Exception as e:
         logger.error(
             f"Error generating minute-by-minute performance report: {e}", exc_info=True
@@ -451,10 +501,7 @@ def generate_backtest_report(
             portfolio_weights=portfolio.portfolio_weights,
         )
         if not benchmark_df.empty:
-            benchmark_df.to_csv(
-                os.path.join(out_dir, "benchmark_buy_and_hold_performance.csv"),
-                index=False,
-            )
+            reports["benchmark_buy_and_hold"] = benchmark_df.copy()
     except Exception as e:
         logger.error(
             f"Error generating buy-and-hold benchmark report: {e}", exc_info=True
@@ -466,16 +513,12 @@ def generate_backtest_report(
             cols_to_analyze = ["portfolio_pct_ret"]
             roll_map = _compute_rolling_stats(pct_df, cols_to_analyze)
             for name, rdf in roll_map.items():
-                rdf.to_csv(os.path.join(out_dir, f"{name}.csv"), index=False)
-                _summarize_rolling_dataframe(rdf).to_csv(
-                    os.path.join(out_dir, f"{name}_summary.csv"), index=False
-                )
+                reports[name] = rdf.copy()
+                reports[f"{name}_summary"] = _summarize_rolling_dataframe(rdf).copy()
             mdf = _compute_monthly_returns(pct_df, cols_to_analyze)
-            mdf.to_csv(os.path.join(out_dir, "monthly_returns.csv"), index=False)
+            reports["monthly_returns"] = mdf.copy()
             if len(cols_to_analyze) > 1:
-                _compute_return_correlations(pct_df, cols_to_analyze).to_csv(
-                    os.path.join(out_dir, "portfolio_return_correlations.csv")
-                )
+                reports["portfolio_return_correlations"] = _compute_return_correlations(pct_df, cols_to_analyze).copy()
     except Exception as e:
         logger.error(f"Error in advanced analytics: {e}", exc_info=True)
 
@@ -497,26 +540,30 @@ def generate_backtest_report(
                 axis=1,
             )
 
-            risk_components_summary.to_csv(
-                os.path.join(out_dir, "portfolio_risk_components.csv")
-            )
-            corr_matrix.to_csv(
-                os.path.join(out_dir, "annualized_correlation_matrix.csv")
-            )
-            logger.info(
-                "Saved portfolio_risk_components.csv and annualized_correlation_matrix.csv"
-            )
+            reports["portfolio_risk_components"] = risk_components_summary.copy()
+
+            reports["annualized_correlation_matrix"] = corr_matrix.copy()
 
         rolling_risk_df = _calculate_rolling_portfolio_risk(
             full_historical_data, portfolio.portfolio_weights
         )
         if not rolling_risk_df.empty:
-            rolling_risk_df.to_csv(
-                os.path.join(out_dir, "rolling_portfolio_risk.csv"), index=False
-            )
-            logger.info("Saved rolling_portfolio_risk.csv")
+            reports["rolling_portfolio_risk"] = rolling_risk_df.copy()
 
     except Exception as e:
         logger.error(f"Error in portfolio risk analytics: {e}", exc_info=True)
 
+
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        # Save all reports to CSV
+        logger.info("Preparing to save report CSVs")
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for name, df in reports.items():
+                futures.append(executor.submit(_build_csv, df, f"{name}.csv", logger, out_dir))
+            for future in futures:
+                future.result()  # Wait for all to complete and catch exceptions
+    except Exception as e:
+        logger.error(f"Error saving reports to CSV: {e}", exc_info=True)
     logger.info("Backtest report generation complete.")

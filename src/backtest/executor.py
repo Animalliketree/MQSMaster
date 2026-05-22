@@ -1,8 +1,10 @@
 import logging
 import math
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
+
+from src.backtest.cost_model import CostModel
 
 
 class BacktestExecutor:
@@ -17,11 +19,18 @@ class BacktestExecutor:
         tickers: List[str],
         leverage: float = 2.0,
         slippage: float = 0.0,
+        cost_model: Optional[CostModel] = None,
+        adv_lookup: Optional[Dict[str, float]] = None,
+        sigma_lookup: Optional[Dict[str, float]] = None,
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.tickers = tickers
         self.leverage = leverage
         self.slippage = slippage
+        # Legacy constant slippage stays available as a fallback (when cost_model is None).
+        self.cost_model: Optional[CostModel] = cost_model
+        self.adv_lookup: Dict[str, float] = dict(adv_lookup or {})
+        self.sigma_lookup: Dict[str, float] = dict(sigma_lookup or {})
 
         # --- Unified Portfolio State ---
         self.cash = initial_capital
@@ -31,15 +40,34 @@ class BacktestExecutor:
 
         self.logger.info(
             f"BacktestExecutor initialized with {initial_capital:.2f} capital, "
-            f"leverage={leverage}, slippage={slippage}, for tickers: {tickers}"
+            f"leverage={leverage}, slippage={slippage}, "
+            f"cost_model={'on' if self.cost_model is not None else 'off'}, "
+            f"for tickers: {tickers}"
         )
 
-    def _apply_slippage(self, price: float, signal_type: str) -> float:
+    def _apply_slippage(
+        self,
+        price: float,
+        signal_type: str,
+        ticker: Optional[str] = None,
+        trade_notional: float = 0.0,
+    ) -> float:
         """
-        Applies slippage to the execution price based on the trade direction.
-        - For BUY orders, the price is increased.
-        - For SELL orders, the price is decreased.
+        Applies execution cost to the price.
+        If a CostModel is configured, uses it (fixed + spread + sqrt impact).
+        Otherwise falls back to the legacy constant-multiplier slippage.
         """
+        if self.cost_model is not None and ticker is not None:
+            adv = float(self.adv_lookup.get(ticker, 0.0))
+            sigma = float(self.sigma_lookup.get(ticker, 0.0))
+            return self.cost_model.apply_to_price(
+                mid_price=price,
+                side=signal_type,
+                trade_notional=abs(trade_notional),
+                adv_notional=adv,
+                sigma_daily=sigma,
+                ticker=ticker,
+            )
         if signal_type == "BUY":
             return price * (1 + self.slippage)
         elif signal_type == "SELL":
@@ -122,7 +150,11 @@ class BacktestExecutor:
         if signal_type == "HOLD" or confidence == 0.0:
             return
 
-        exec_price = self._apply_slippage(arrival_price, signal_type)
+        # First-pass approximation of trade notional so the cost model can size impact.
+        approx_notional = abs(port_notional * ticker_weight * confidence)
+        exec_price = self._apply_slippage(
+            arrival_price, signal_type, ticker=ticker, trade_notional=approx_notional,
+        )
         if exec_price <= 0:
             self.logger.warning(
                 f"Cannot execute trade for {ticker}: Invalid execution price of {exec_price} after slippage."
@@ -201,24 +233,22 @@ class BacktestExecutor:
             "updated_cash": self.cash,
         }
 
-    def dump_trade_log(self):
+    def dump_trade_log(self) -> list[str]:
         """
-        Emit all recorded trades to the executor's logger.
-
-        This method should typically be called once after a backtest run has
-        completed, so that detailed trade output does not interfere with
-        progress bars (for example, those produced by ``tqdm``) or other
-        console output written during execution.
-
-        The method returns nothing; it iterates over ``self.trade_log`` and
-        logs a formatted message for each recorded trade.
+        Generate formatted trade log entries and return them as a list of strings.
         """
+        trade_logs: list[str] = []
         for entry in self.trade_log:
-            self.logger.info(
-                "Executed %s: %s| %s @ %.2f$ Cash after trade: %.2f$",
-                entry["ticker"],
-                entry["signal_type"],
-                entry["shares"],
-                entry["fill_price"],
-                entry["cash_after"],
+            ts = entry["timestamp"]
+            ts_str = (
+                ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, "strftime") else str(ts)
             )
+            msg = (
+                f"[{entry.get('portfolio_id', 'unknown')}] "
+                f"{ts_str} - "
+                f"{entry['ticker']} | {entry['signal_type']} "
+                f"{entry['shares']} @ {entry['fill_price']:.2f}$ "
+                f"cash={entry['cash_after']:.2f}$"
+            )
+            trade_logs.append(msg)
+        return trade_logs
