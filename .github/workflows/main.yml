@@ -121,7 +121,7 @@ jobs:
           database: ${{ secrets.DB_NAME }}
           db_user: ${{ secrets.DB_USER }}
           password: ${{ secrets.DB_PASSWORD }}
-          sslmode: ${{ secrets.DB_SSLMODE }}
+          sslmode: "require"
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           PYTHONWARNINGS: error
         run: |
