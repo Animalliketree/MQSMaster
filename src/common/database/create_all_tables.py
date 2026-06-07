@@ -1,5 +1,4 @@
 # src/common/database/create_all_tables.py
-from .MQSDBConnector import MQSDBConnector
 from .schemaDefinitions import SchemaDefinitions
 
 

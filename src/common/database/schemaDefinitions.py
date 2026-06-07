@@ -1,7 +1,7 @@
 import logging
 
 try:
-    from common.database.MQSDBConnector import MQSDBConnector
+    from .MQSDBConnector import MQSDBConnector
 except ImportError:
     logging.warning("MQSDBConnector relative import failed; using absolute import.")
     from src.common.database.MQSDBConnector import MQSDBConnector
@@ -14,7 +14,7 @@ class SchemaDefinitions:
     """
 
     def __init__(self):
-        self.db = MQSDBConnector()
+        self.db: MQSDBConnector = MQSDBConnector()
 
     def create_all_tables(self):
         """

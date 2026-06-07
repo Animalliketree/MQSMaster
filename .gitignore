@@ -30,3 +30,4 @@ visualise_gpt2.ipynb
 build/
 dist/
 **/api_test.py
+typings/
