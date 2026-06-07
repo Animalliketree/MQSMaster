@@ -8,7 +8,7 @@ def main():
     Main function to initialize the database by creating all tables.
     """
     print("Attempting to connect to the database and create tables...")
-    
+
     try:
         # 1. Create an instance of the SchemaDefinitions class.
         #    This will also initialize the database connection via MQSDBConnector.
