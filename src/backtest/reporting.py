@@ -111,6 +111,18 @@ def aggregate_final_metrics(perf_df: pd.DataFrame) -> pd.DataFrame:
 # --- OPTIMIZED High-Frequency and Benchmark Reporting Helpers (Unchanged) ---
 
 
+MINUTE_RESAMPLE_CELL_LIMIT = 5_000_000
+
+
+def _minute_resample_too_large(price_pivot: pd.DataFrame) -> bool:
+    if price_pivot.empty:
+        return False
+    span_minutes = int(
+        (price_pivot.index.max() - price_pivot.index.min()).total_seconds() // 60
+    )
+    return span_minutes * len(price_pivot.columns) > MINUTE_RESAMPLE_CELL_LIMIT
+
+
 def _generate_minute_by_minute_performance(
     trade_log: List[Dict],
     full_historical_data: pd.DataFrame,
@@ -128,6 +140,14 @@ def _generate_minute_by_minute_performance(
     )
     price_pivot.index = pd.to_datetime(price_pivot.index, errors="coerce")
     price_pivot = price_pivot[price_pivot.index.notna()].sort_index()
+    if _minute_resample_too_large(price_pivot):
+        logging.warning(
+            "Skipping minute-by-minute performance: %d tickers x %d-min span exceeds %d-cell limit",
+            len(price_pivot.columns),
+            int((price_pivot.index.max() - price_pivot.index.min()).total_seconds() // 60),
+            MINUTE_RESAMPLE_CELL_LIMIT,
+        )
+        return pd.DataFrame()
     minute_prices = price_pivot.resample("min").ffill().bfill()
 
     if not trade_log:
@@ -200,6 +220,14 @@ def _generate_buy_and_hold_benchmark(
     )
     price_pivot.index = pd.to_datetime(price_pivot.index, errors="coerce")
     price_pivot = price_pivot[price_pivot.index.notna()].sort_index()
+    if _minute_resample_too_large(price_pivot):
+        logging.warning(
+            "Skipping buy-and-hold benchmark: %d tickers x %d-min span exceeds %d-cell limit",
+            len(price_pivot.columns),
+            int((price_pivot.index.max() - price_pivot.index.min()).total_seconds() // 60),
+            MINUTE_RESAMPLE_CELL_LIMIT,
+        )
+        return pd.DataFrame()
     minute_prices = price_pivot.resample("min").ffill().bfill()
 
     first_day_prices = minute_prices.iloc[0]
@@ -327,8 +355,10 @@ def _calculate_portfolio_risk_components(
     price_pivot = full_historical_data.pivot(
         index="timestamp", columns="ticker", values="close_price"
     )
-    price_pivot_filled = price_pivot.ffill()
-    daily_returns = price_pivot_filled.pct_change().dropna()
+    price_pivot.index = pd.to_datetime(price_pivot.index, errors="coerce")
+    price_pivot = price_pivot[price_pivot.index.notna()].sort_index()
+    daily_close = price_pivot.resample("1D").last().ffill()
+    daily_returns = daily_close.pct_change().dropna()
 
     if daily_returns.empty:
         return pd.DataFrame(), pd.Series(dtype=float), pd.DataFrame()
@@ -359,8 +389,10 @@ def _calculate_rolling_portfolio_risk(
     price_pivot = full_historical_data.pivot(
         index="timestamp", columns="ticker", values="close_price"
     )
-    price_pivot_filled = price_pivot.ffill()
-    daily_returns = price_pivot_filled.pct_change().dropna()
+    price_pivot.index = pd.to_datetime(price_pivot.index, errors="coerce")
+    price_pivot = price_pivot[price_pivot.index.notna()].sort_index()
+    daily_close = price_pivot.resample("1D").last().ffill()
+    daily_returns = daily_close.pct_change().dropna()
 
     if len(daily_returns) < window_days:
         return pd.DataFrame()

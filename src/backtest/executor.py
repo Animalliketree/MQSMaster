@@ -213,6 +213,7 @@ class BacktestExecutor:
         else:  # Finalizing a SELL
             self.cash += trade_value
             self.positions[ticker] -= quantity_to_trade
+        self.latest_prices[ticker] = arrival_price
 
         self.trade_log.append(
             {

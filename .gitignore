@@ -23,6 +23,7 @@ mqs/
 *.lock
 .vscode/
 src/backtest/data/
+.python-version
 # Jupyter Notebook outputs (keeps diffs clean)
 *.ipynb
 **/.ipynb
