@@ -57,7 +57,7 @@ class BasePortfolio(ABC):
         self.executor = executor
         self.running: bool = True
         self.debug: bool = debug
-        self.backtest_start_date = backtest_start_date
+        self.backtest_start_date: datetime | None = backtest_start_date
         self._last_processed_timestamp: datetime | None = None
 
         self.portfolio_id: str = config_dict.get("PORTFOLIO_ID", "0")
