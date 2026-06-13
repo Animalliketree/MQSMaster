@@ -52,7 +52,16 @@ class StrategyContext:
     """
     The master context object passed to the strategy's OnData method on each time step.
     It encapsulates MarketData, PortfolioManager, and provides trade execution methods"""
-    def __init__(self, market_data_df, cash_df, positions_df, port_notional_df, current_time, executor, portfolio_config):
+    def __init__(
+        self,
+        market_data_df,
+        cash_df,
+        positions_df,
+        port_notional_df,
+        current_time: datetime | None,
+        executor,
+        portfolio_config
+    ):
         self._executor = executor
         self._portfolio_config = portfolio_config
         self._positions_df = positions_df
@@ -66,7 +75,7 @@ class StrategyContext:
                     effective_time = datetime.now(timezone)
             else:
                 effective_time = datetime.now(timezone)
-        self.time = effective_time
+        self.time: datetime = effective_time
 
         # Initialize the high-level helper classes
         self.Market = MarketData(market_data_df, effective_time)

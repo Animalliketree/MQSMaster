@@ -40,12 +40,12 @@ class BacktestEngine:
         self,
         db_connector: "MQSDBConnector",
         backtest_executor = None,
-        backtest_output_root: str | None = None,
+        backtest_output_root: str = "",
     ):
         self.db_connector: MQSDBConnector = db_connector
         self.backtest_executor = backtest_executor
         self.logger: Logger = logging.getLogger(self.__class__.__name__)
-        self.backtest_output_root: str | None = backtest_output_root
+        self.backtest_output_root: str = backtest_output_root
         self.portfolio_classes: list[type[BasePortfolio]] = []
         self.start_date: str = ""
         self.end_date: str = ""

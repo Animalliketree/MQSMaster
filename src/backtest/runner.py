@@ -26,8 +26,8 @@ class BacktestRunner:
     def __init__(
         self,
         portfolio: "BasePortfolio",
-        start_date: str | datetime | pd.Timestamp,
-        end_date: str | datetime | pd.Timestamp | None = None,
+        start_date: str | datetime,
+        end_date: datetime | str = "",
         initial_capital: float = 100000.0,
         slippage: float = 0.0,
         cost_model: Any = None,
@@ -93,13 +93,14 @@ class BacktestRunner:
             return False
 
         # This is your correct "cold start" fix for the *data query*
-        lookback_days = getattr(self.portfolio, "lookback_days", None)
+        lookback_days: int | None = getattr(self.portfolio, "lookback_days", None)
         if lookback_days:
-            adjusted_start = self.start_date - pd.Timedelta(days=lookback_days)
+            adjusted_start: datetime = self.start_date - pd.Timedelta(days=lookback_days)
             # This 'self.start_date' is now only used for the *query*
             self.start_date = adjusted_start
             self.logger.info(
-                f"Adjusted data query Start Date to {self.start_date} to include lookback_days={lookback_days}"
+                "Adjusted data query Start Date to %s to include lookback_days=%i",
+                self.start_date, lookback_days
             )
 
         df = fetch_historical_data(self.portfolio, self.start_date, self.end_date)
@@ -159,7 +160,8 @@ class BacktestRunner:
         ]
         if len(loop_timestamps) == 0:
             self.logger.error(
-                f"No data found on or after the intended start date: {self.backtest_loop_start_date}"
+                "No data found on or after the intended start date: %s",
+                self.backtest_loop_start_date
             )
             return
         # --- END FIX 2 ---

@@ -12,7 +12,6 @@ try:
     from portfolios.portfolio_1.strategy import VolMomentum
     from portfolios.portfolio_2.strategy import MomentumStrategy
     from portfolios.portfolio_3.strategy import RegimeAdaptiveStrategy
-    from portfolios.portfolio_dummy.strategy import CrossoverRmiStrategy
 except ImportError:
     logging.debug("Necessary modules relative imports failed; using absolute import.")
     from src.common.database.MQSDBConnector import MQSDBConnector
@@ -21,7 +20,6 @@ except ImportError:
     from src.portfolios.portfolio_1.strategy import VolMomentum
     from src.portfolios.portfolio_2.strategy import MomentumStrategy
     from src.portfolios.portfolio_3.strategy import RegimeAdaptiveStrategy
-    from src.portfolios.portfolio_dummy.strategy import CrossoverRmiStrategy
 
 logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"

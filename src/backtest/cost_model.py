@@ -60,10 +60,10 @@ class CostModel:
         self.params: CostModelParams = params or CostModelParams()
         self.spread_overrides: Mapping[str, float] = dict(spread_overrides or {})
 
-    def _spread_component_bps(self, ticker: str | None) -> float:
+    def _spread_component_bps(self, ticker: str = "") -> float:
         if not self.params.enable_spread:
             return 0.0
-        if ticker is not None and ticker in self.spread_overrides:
+        if ticker is not "" and ticker in self.spread_overrides:
             return 0.5 * float(self.spread_overrides[ticker])
         return 0.5 * float(self.params.spread_bps_default)
 

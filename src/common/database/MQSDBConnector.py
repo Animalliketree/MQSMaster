@@ -3,11 +3,13 @@ import os
 import time
 from typing import Any
 
+from typing import Sequence
 import psycopg2
 from psycopg2.extensions import connection
 import psycopg2.extras
 from psycopg2.pool import ThreadedConnectionPool
 from dotenv import load_dotenv
+from sympy import sequence
 
 # Configure logging for better debugging and tracing.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
@@ -158,7 +160,7 @@ class MQSDBConnector:
 
     def execute_query(self,
         sql: str | bytes,
-        values: tuple[Any] | None = None,
+        values: Sequence[Any] | None = None,
         fetch: bool=False
     ) -> dict[str, str]:
         """

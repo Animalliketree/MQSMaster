@@ -14,7 +14,7 @@ import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
 from multiprocessing import RLock, cpu_count
-from typing import List, Optional, Type
+from typing import Any, List, Optional, Type
 
 import pandas as pd
 from tqdm import tqdm
@@ -24,14 +24,8 @@ from src.backtest.cost_model import CostModel
 from src.common.database.MQSDBConnector import MQSDBConnector
 from src.portfolios.portfolio_1.strategy import VolMomentum
 from src.portfolios.portfolio_2.strategy import MomentumStrategy
-from src.portfolios.portfolio_3.strategy import RegimeAdaptiveStrategy
-from src.portfolios.portfolio_4.strategy import TrendRotateStrategy
-from src.portfolios.portfolio_5.strategy import RBPStrategy
 from src.portfolios.portfolio_6.strategy import Portfolio6Strategy
-from src.portfolios.portfolio_7.strategy import Portfolio7Strategy
-from src.portfolios.portfolio_8.strategy import Portfolio8Strategy
 from src.portfolios.portfolio_BASE.strategy import BasePortfolio
-from src.portfolios.portfolio_dummy.strategy import CrossoverRmiStrategy
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -41,11 +35,18 @@ Backtest configuration parameters:
 - START_DATE: The start date for the backtest in "YYYY-MM-DD" format.
 - END_DATE: The end date for the backtest in "YYYY-MM-DD" format.
 - INITIAL_CAPITAL: The initial capital for the backtest as a float.
-- SLIPPAGE: The slippage to be applied to trade executions, expressed as a decimal (e.g., 0.000001 for 0.1 basis point).
-- BACKTEST_MODE: The mode of backtesting to be used, either "event" for event-driven backtesting or "fast" for a faster approximation mode.
-- DEFAULT_PORTFOLIO_CLASSES: A list of default portfolio strategy classes to be used in the backtest if no specific classes are provided.
-- AVAILABLE_PORTFOLIO_CLASSES: A list of all available portfolio strategy classes that can be used in the backtest.
-- BACKTEST_NUM_BATCHES: An optional integer specifying the number of batches to use for parallel backtest execution. If set to None, the batch count will be automatically determined based on the number of CPU cores and the number of portfolios.
+- SLIPPAGE: The slippage to be applied to trade executions, expressed as a
+    decimal (e.g., 0.000001 for 0.1 basis point).
+- BACKTEST_MODE: The mode of backtesting to be used, either "event" for event-
+    driven backtesting or "fast" for a faster approximation mode.
+- DEFAULT_PORTFOLIO_CLASSES: A list of default portfolio strategy classes to be
+    used in the backtest if no specific classes are provided.
+- AVAILABLE_PORTFOLIO_CLASSES: A list of all available portfolio strategy
+    classes that can be used in the backtest.
+- BACKTEST_NUM_BATCHES: An optional integer specifying the number of batches to
+    use for parallel backtest execution. If set to None, the batch count will
+    be automatically determined based on the number of CPU cores and the number
+    of portfolios.
 """
 START_DATE = "2023-01-01"
 END_DATE = "2026-05-15"
@@ -64,25 +65,60 @@ DEFAULT_PORTFOLIO_CLASSES = [
 ]
 
 AVAILABLE_PORTFOLIO_CLASSES = [
-    
-    Portfolio6Strategy
+        VolMomentum,
+        MomentumStrategy
 ]
 
 # Adapters for external vectorized backtest approximations of the above strategies.
 """
-quick: True/False flag to control whether the adapter should use faster approximations (e.g. fewer lookback periods, simpler logic) to speed up execution during fast-mode backtests. Adapters can choose how to interpret this flag based on the complexity of the underlying strategy and the desired tradeoff between accuracy and speed.
+quick: True/False flag to control whether the adapter should use faster
+    approximations (e.g. fewer lookback periods, simpler logic) to speed up
+    execution during fast-mode backtests. Adapters can choose how to interpret
+    this flag based on the complexity of the underlying strategy and the
+    desired tradeoff between accuracy and speed.
 
-mc_enabled: True/False flag to control whether the adapter should prepare its output in a way that is compatible with Monte Carlo simulation. This may involve ensuring that the target_weights and signal_strength outputs are structured appropriately for resampling and path generation during the Monte Carlo process. Adapters can choose how to interpret this flag based on the specific requirements of their strategy and the intended use of the Monte Carlo results.
+mc_enabled: True/False flag to control whether the adapter should prepare its
+    output in a way that is compatible with Monte Carlo simulation. This may
+    involve ensuring that the target_weights and signal_strength outputs are
+    structured appropriately for resampling and path generation during the
+    Monte Carlo process. Adapters can choose how to interpret this flag based
+    on the specific requirements of their strategy and the intended use of the
+    Monte Carlo results.
 
-mc_n_sims: Integer specifying the number of Monte Carlo simulation paths that will be generated during fast-mode backtests when mc_enabled is True. Adapters can use this information to optimize their output preparation, such as by precomputing certain values or structuring their outputs in a way that facilitates efficient resampling and path generation for the specified number of simulations.
+mc_n_sims: Integer specifying the number of Monte Carlo simulation paths that
+    will be generated during fast-mode backtests when mc_enabled is True.
+    Adapters can use this information to optimize their output preparation,
+    such as by precomputing certain values or structuring their outputs in a
+    way that facilitates efficient resampling and path generation for the
+    specified number of simulations.
 
-mc_method: String specifying the method of Monte Carlo simulation (e.g. "bootstrap", "parametric") that will be used during fast-mode backtests when mc_enabled is True. Adapters can use this information to tailor their output preparation to the specific requirements of the chosen Monte Carlo method, such as by ensuring that their outputs are compatible with the resampling techniques or distributional assumptions associated with the specified method.
+mc_method: String specifying the method of Monte Carlo simulation (e.g.
+    "bootstrap", "parametric") that will be used during fast-mode backtests
+    when mc_enabled is True. Adapters can use this information to tailor their
+    output preparation to the specific requirements of the chosen Monte Carlo
+    method, such as by ensuring that their outputs are compatible with the
+    resampling techniques or distributional assumptions associated with the
+    specified method.
 
-mc_block_size: Integer specifying the block size to be used for block bootstrapping during Monte Carlo simulation when mc_enabled is True and mc_method is "bootstrap". Adapters can use this information to structure their outputs in a way that facilitates efficient block resampling during the Monte Carlo process, such as by organizing their outputs into contiguous blocks of the specified size.
+mc_block_size: Integer specifying the block size to be used for block
+    bootstrapping during Monte Carlo simulation when mc_enabled is True and
+    mc_method is "bootstrap". Adapters can use this information to structure
+    their outputs in a way that facilitates efficient block resampling during
+    the Monte Carlo process, such as by organizing their outputs into
+    contiguous blocks of the specified size.
 
-mc_seed: Integer seed value for random number generation during Monte Carlo simulation when mc_enabled is True. Adapters can use this information to ensure that any stochastic elements of their output preparation are reproducible and consistent across different runs of the backtest, which can be important for debugging and result validation purposes.
+mc_seed: Integer seed value for random number generation during Monte Carlo
+    simulation when mc_enabled is True. Adapters can use this information to
+    ensure that any stochastic elements of their output preparation are
+    reproducible and consistent across different runs of the backtest, which
+    can be important for debugging and result validation purposes.
 
-mc_plot_percentiles: List of integers specifying the percentiles to be plotted during Monte Carlo simulation when mc_enabled is True. Adapters can use this information to prepare their outputs in a way that facilitates the generation of percentile plots during the Monte Carlo process, such as by structuring their outputs to allow for easy calculation and visualization of the specified percentiles.
+mc_plot_percentiles: List of integers specifying the percentiles to be plotted
+    during Monte Carlo simulation when mc_enabled is True. Adapters can use
+    this information to prepare their outputs in a way that facilitates the
+    generation of percentile plots during the Monte Carlo process, such as by
+    structuring their outputs to allow for easy calculation and visualization
+    of the specified percentiles.
 """
 
 FAST_MODE_CONFIG = {
@@ -98,10 +134,10 @@ FAST_MODE_CONFIG = {
 }
 
 def _resolve_fast_mode_config(
-    fast_config=None,
+    fast_config: dict[str, Any] | None = None,
     *,
-    fast_years_back=None,
-    fast_benchmark_label=None,
+    fast_years_back: int | float = 0,
+    fast_benchmark_label = None,
 ):
     """Resolve fast-mode config; when both are provided, fast_config values take precedence."""
     resolved = deepcopy(FAST_MODE_CONFIG)

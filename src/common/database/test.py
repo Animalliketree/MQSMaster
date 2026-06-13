@@ -17,7 +17,7 @@ def test_connection():
         return
     response = db.execute_query("SELECT NOW();", fetch=True)  # Get current timestamp
     if response['status'] == 'success':
-        print("✅ PostgreSQL connection successful! Current DB Time:", response['data'][0]['now'])
+        print("✅ PostgreSQL connection successful! Current DB Time:", str(response['data'][0]['now']))
     else:
         print("❌ Connection failed:", response['message'])
 
